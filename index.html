@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZXYwatch - Native Controls</title>
+    <style>
+        /* --- CORE THEME --- */
+        body { margin: 0; background-color: #0f0f0f; color: white; font-family: -apple-system, BlinkMacSystemFont, "Roboto", sans-serif; display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+        
+        .app-container { width: 100%; max-width: 500px; height: 100%; background: #0f0f0f; display: flex; flex-direction: column; position: relative; border-left: 1px solid #333; border-right: 1px solid #333; }
+
+        /* --- HEADER --- */
+        .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: rgba(15, 15, 15, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid #222; z-index: 50; }
+        .logo { font-weight: 900; font-size: 20px; letter-spacing: -1px; background: linear-gradient(to right, #ff0050, #ff4b4b); -webkit-background-clip: text; -webkit-text-fill-color: transparent; cursor: pointer; }
+        
+        .search-bar { flex: 1; margin: 0 15px; }
+        .search-input { width: 100%; background: #222; border: 1px solid #333; color: white; padding: 8px 15px; border-radius: 20px; outline: none; font-size: 14px; }
+        
+        .header-icons { display: flex; gap: 15px; align-items: center; }
+        .icon-btn { background: none; border: none; color: white; font-size: 22px; cursor: pointer; padding: 0; }
+        .user-mini-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid #333; cursor: pointer; }
+
+        /* --- FEED --- */
+        .feed-container { flex: 1; overflow-y: auto; padding-bottom: 60px; scrollbar-width: none; }
+        .feed-container::-webkit-scrollbar { display: none; }
+
+        .video-card { background: #0f0f0f; margin-bottom: 20px; border-bottom: 8px solid #1a1a1a; padding-bottom: 15px; }
+        
+        /* MEDIA WRAPPER */
+        .media-wrapper { width: 100%; aspect-ratio: 16/9; background: black; position: relative; overflow: hidden; cursor: pointer; }
+        
+        .video-thumbnail { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; transition: opacity 0.3s ease; z-index: 2; pointer-events: none; }
+        .video-player { width: 100%; height: 100%; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 1; display: none; background: black; }
+        
+        /* META DATA */
+        .meta-data { padding: 12px 15px 0 15px; }
+        .video-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: block; line-height: 1.2; }
+        .video-desc { font-size: 13px; color: #aaa; margin-bottom: 8px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .video-desc.expanded { -webkit-line-clamp: unset; color: #ccc; }
+        .video-stats { color: #666; font-size: 12px; margin-bottom: 10px; }
+
+        .uploader-row { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; }
+        .uploader-info { display: flex; align-items: center; gap: 10px; }
+        .uploader-pic { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+        .uploader-name { font-weight: 600; font-size: 14px; }
+        .sub-btn { background: white; color: black; border: none; padding: 6px 14px; border-radius: 18px; font-weight: bold; font-size: 12px; cursor: pointer; }
+        .sub-btn.subscribed { background: #333; color: white; }
+
+        /* POLLS & IMAGES */
+        .image-post { width: 100%; height: auto; max-height: 500px; object-fit: contain; display: block; }
+        .poll-container { padding: 20px; background: #1a1a1a; margin: 0 15px; border-radius: 8px; }
+        .poll-question { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
+        .poll-option { background: #333; margin-bottom: 8px; border-radius: 4px; padding: 10px; position: relative; cursor: pointer; overflow: hidden; }
+        .poll-bg { position: absolute; top:0; left:0; height:100%; background: rgba(255,0,80,0.4); z-index:1; width:0%; transition: width 0.3s; }
+        .poll-content { position: relative; z-index:2; display: flex; justify-content: space-between; font-size: 13px; }
+
+        /* ACTIONS */
+        .action-row { display: flex; align-items: center; justify-content: space-around; margin-top: 10px; border-top: 1px solid #222; padding-top: 10px; }
+        .action-item { cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 13px; color: #aaa; }
+        .action-item:hover { color: white; }
+        .action-icon { font-size: 18px; }
+        .liked .action-icon { color: #3ea6ff; }
+        .hearted .action-icon { color: #ff0050; }
+
+        /* COMMENTS */
+        .comments-area { padding: 10px 15px; background: #151515; display: none; border-top: 1px solid #222; }
+        .comments-area.show { display: block; }
+        .comment-input-row { display: flex; gap: 10px; margin-top: 10px; }
+        .comment-input { flex: 1; background: transparent; border: none; border-bottom: 1px solid #444; color: white; padding: 5px; outline: none; }
+        .post-btn { color: #3ea6ff; background: none; border: none; font-weight: bold; cursor: pointer; }
+        .comment-list { max-height: 150px; overflow-y: auto; font-size: 13px; }
+        .single-comment { margin-bottom: 6px; }
+        .comment-user { font-weight: bold; color: #888; margin-right: 5px; }
+
+        /* SCREENS & MODALS */
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0f0f0f; z-index: 100; display: flex; flex-direction: column; }
+        .screen.hidden { display: none; }
+        .login-box { padding: 40px; text-align: center; margin: auto; width: 100%; max-width: 320px; }
+        .input-field { width: 100%; padding: 12px; background: #222; border: 1px solid #333; border-radius: 6px; color: white; margin-bottom: 10px; box-sizing: border-box; }
+        .primary-btn { width: 100%; padding: 12px; background: #ff0050; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        .modal.active { display: flex; }
+        .modal-card { width: 90%; max-width: 350px; background: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; }
+        
+        .upload-tabs { display: flex; border-bottom: 1px solid #333; margin-bottom: 15px; }
+        .tab-btn { flex: 1; background: none; border: none; color: #aaa; padding: 10px; cursor: pointer; }
+        .tab-btn.active { color: white; border-bottom: 2px solid #ff0050; font-weight: bold; }
+        .upload-section { display: none; }
+        .upload-section.active { display: block; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="header">
+        <div class="logo" onclick="renderFeed()">ZXYwatch</div>
+        <div class="search-bar">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search" onkeyup="renderFeed()">
+        </div>
+        <div class="header-icons">
+            <button class="icon-btn" onclick="openUploadModal()">+</button>
+            <img id="headerAvatar" class="user-mini-avatar" src="" onclick="openProfileModal()">
+        </div>
+    </div>
+
+    <div id="videoFeed" class="feed-container"></div>
+</div>
+
+<div id="loginScreen" class="screen">
+    <div class="login-box">
+        <h1 style="font-weight:900; margin-bottom:30px;">ZXYwatch</h1>
+        <label style="cursor:pointer; margin-bottom:20px; display:inline-block;">
+            <img id="loginPreview" src="https://ui-avatars.com/api/?name=User&background=333&color=fff" style="width:80px; height:80px; border-radius:50%; object-fit:cover; border:2px solid #ff0050;">
+            <input type="file" style="display:none" onchange="handleAvatarUpload(this)">
+            <div style="font-size:12px; color:#aaa; margin-top:5px;">Tap to add photo</div>
+        </label>
+        <form onsubmit="event.preventDefault(); attemptLogin();">
+            <input type="text" id="usernameInput" class="input-field" placeholder="Username" required>
+            <input type="password" id="passwordInput" class="input-field" placeholder="Password" required>
+            <button type="submit" class="primary-btn">Enter</button>
+        </form>
+    </div>
+</div>
+
+<div id="uploadModal" class="modal">
+    <div class="modal-card">
+        <h3>Create Post</h3>
+        <div class="upload-tabs">
+            <button class="tab-btn active" onclick="setUploadType('video')">Video</button>
+            <button class="tab-btn" onclick="setUploadType('image')">Picture</button>
+            <button class="tab-btn" onclick="setUploadType('poll')">Poll</button>
+        </div>
+        
+        <input type="text" id="postTitle" class="input-field" placeholder="Title">
+        <textarea id="postDesc" class="input-field" placeholder="Description (Tell us about it...)" rows="3"></textarea>
+
+        <div id="sect-video" class="upload-section active">
+            <input type="file" id="vidFile" class="input-field" accept="video/*">
+            <p style="font-size:11px; color:#aaa;">Supports 30+ Mins</p>
+        </div>
+        <div id="sect-image" class="upload-section">
+            <input type="file" id="imgFile" class="input-field" accept="image/*">
+        </div>
+        <div id="sect-poll" class="upload-section">
+            <input type="text" id="pollOpt1" class="input-field" placeholder="Option 1">
+            <input type="text" id="pollOpt2" class="input-field" placeholder="Option 2">
+        </div>
+
+        <button id="postBtn" class="primary-btn" onclick="startUploadProcess()">Post</button>
+        <div id="uploadStatus" style="display:none; color:#3ea6ff; margin-top:10px; font-size:12px; text-align:center;">Processing Large File...</div>
+        <button onclick="closeUploadModal()" style="width:100%; background:none; border:none; color:#aaa; margin-top:10px; cursor:pointer;">Cancel</button>
+    </div>
+</div>
+
+<div id="profileModal" class="modal">
+    <div class="modal-card" style="text-align:center;">
+        <img id="statsAvatar" src="" style="width:60px; height:60px; border-radius:50%; margin-bottom:10px;">
+        <h2 id="statsName" style="margin:0;">Name</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin:20px 0;">
+            <div style="background:#2a2a2a; padding:10px; border-radius:8px;">
+                <span id="countSubs" style="display:block; font-size:18px; font-weight:bold;">0</span>
+                <span style="font-size:11px; color:#aaa;">Subs</span>
+            </div>
+            <div style="background:#2a2a2a; padding:10px; border-radius:8px;">
+                <span id="countViews" style="display:block; font-size:18px; font-weight:bold;">0</span>
+                <span style="font-size:11px; color:#aaa;">Views</span>
+            </div>
+            <div style="background:#2a2a2a; padding:10px; border-radius:8px;">
+                <span id="countLikes" style="display:block; font-size:18px; font-weight:bold;">0</span>
+                <span style="font-size:11px; color:#aaa;">Likes</span>
+            </div>
+        </div>
+        <button onclick="logout()" style="color:#ff4b4b; background:none; border:1px solid #333; padding:8px 20px; border-radius:20px; cursor:pointer;">Log Out</button>
+        <button onclick="document.getElementById('profileModal').classList.remove('active')" style="margin-top:15px; display:block; width:100%; background:none; border:none; color:white; cursor:pointer;">Close</button>
+        <button onclick="clearAllData()" style="font-size:10px; color:#555; background:none; border:none; cursor:pointer; margin-top:10px;">Reset App Data</button>
+    </div>
+</div>
+
+<script>
+    // --- DATABASE ---
+    const DB_NAME = "ZXY_LargeStorage_v5"; // Supports larger files
+    const DB_VERSION = 1;
+    let db;
+    let currentUploadType = 'video';
+
+    function initDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onupgradeneeded = e => {
+                db = e.target.result;
+                if (!db.objectStoreNames.contains("media")) db.createObjectStore("media", { keyPath: "id" });
+            };
+            request.onsuccess = e => { db = e.target.result; resolve(db); };
+            request.onerror = () => reject("DB Error");
+        });
+    }
+
+    function saveMediaToDB(id, blob) {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(["media"], "readwrite");
+            tx.objectStore("media").put({ id: id, blob: blob });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject();
+        });
+    }
+
+    function getMediaFromDB(id) {
+        return new Promise(resolve => {
+            const tx = db.transaction(["media"], "readonly");
+            const req = tx.objectStore("media").get(id);
+            req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+            req.onerror = () => resolve(null);
+        });
+    }
+
+    // --- AUTH ---
+    let currentUser = null;
+    let tempAvatar = "";
+
+    async function init() {
+        await initDB(); 
+        const session = localStorage.getItem('ZXY_Current_Session');
+        if (session) {
+            currentUser = JSON.parse(session);
+            setupApp();
+        }
+    }
+
+    function handleAvatarUpload(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = e => { tempAvatar = e.target.result; document.getElementById('loginPreview').src = tempAvatar; };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function attemptLogin() {
+        const name = document.getElementById('usernameInput').value.trim();
+        const pass = document.getElementById('passwordInput').value.trim();
+        if (!name || !pass) return;
+
+        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
+        if (!users[name]) {
+            users[name] = { password: pass, avatar: tempAvatar || `https://ui-avatars.com/api/?name=${name}`, subscribers: [] };
+            localStorage.setItem('ZXY_Secure_Users', JSON.stringify(users));
+        } else if (users[name].password !== pass) return alert("Wrong password");
+        
+        currentUser = { name, ...users[name] };
+        localStorage.setItem('ZXY_Current_Session', JSON.stringify(currentUser));
+        setupApp();
+    }
+
+    function setupApp() {
+        document.getElementById('loginScreen').classList.add('hidden');
+        document.getElementById('headerAvatar').src = currentUser.avatar;
+        renderFeed();
+    }
+
+    function logout() { localStorage.removeItem('ZXY_Current_Session'); location.reload(); }
+
+    // --- UPLOAD & THUMBNAIL ---
+    function openUploadModal() { document.getElementById('uploadModal').classList.add('active'); }
+    function closeUploadModal() { 
+        document.getElementById('uploadModal').classList.remove('active'); 
+        document.getElementById('uploadStatus').style.display = 'none';
+        document.getElementById('postBtn').disabled = false;
+    }
+
+    function setUploadType(type) {
+        currentUploadType = type;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.upload-section').forEach(s => s.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById(`sect-${type}`).classList.add('active');
+    }
+
+    function generateThumbnail(file) {
+        return new Promise(resolve => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.currentTime = 1.0; 
+            video.muted = true;
+            video.onseeked = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 320; 
+                canvas.height = (320 / video.videoWidth) * video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            video.onerror = () => resolve(null);
+        });
+    }
+
+    async function startUploadProcess() {
+        const title = document.getElementById('postTitle').value.trim();
+        const desc = document.getElementById('postDesc').value.trim();
+        const postId = Date.now();
+        let fileToSave = null, thumbnail = null, pollData = null;
+
+        if (!title) return alert("Please add a title.");
+
+        const btn = document.getElementById('postBtn');
+        btn.disabled = true;
+        document.getElementById('uploadStatus').style.display = 'block';
+
+        if (currentUploadType === 'video') {
+            const file = document.getElementById('vidFile').files[0];
+            if (!file) { btn.disabled = false; return alert("Select a video."); }
+            fileToSave = file;
+            document.getElementById('uploadStatus').innerText = "Generating Preview...";
+            thumbnail = await generateThumbnail(file);
+        } 
+        else if (currentUploadType === 'image') {
+            fileToSave = document.getElementById('imgFile').files[0];
+            if (!fileToSave) { btn.disabled = false; return alert("Select an image."); }
+        } 
+        else if (currentUploadType === 'poll') {
+            const o1 = document.getElementById('pollOpt1').value.trim();
+            const o2 = document.getElementById('pollOpt2').value.trim();
+            if (!o1 || !o2) { btn.disabled = false; return alert("2 options required."); }
+            pollData = { options: [o1, o2], votes: [0, 0], voters: [] };
+        }
+
+        document.getElementById('uploadStatus').innerText = "Saving Large File...";
+
+        const newPost = {
+            id: postId,
+            type: currentUploadType,
+            title: title,
+            description: desc,
+            uploader: currentUser.name,
+            timestamp: new Date().toLocaleDateString(),
+            thumbnail: thumbnail,
+            likes: [], hearts: [], comments: [], poll: pollData, views: 0
+        };
+
+        if (fileToSave) await saveMediaToDB(postId, fileToSave);
+
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        feed.unshift(newPost);
+        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+
+        closeUploadModal();
+        document.getElementById('postTitle').value = "";
+        document.getElementById('postDesc').value = "";
+        document.getElementById('vidFile').value = "";
+        btn.innerText = "Post";
+        renderFeed();
+    }
+
+    // --- RENDER & PREVIEW LOGIC ---
+    function renderFeed() {
+        const container = document.getElementById('videoFeed');
+        container.innerHTML = "";
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
+        const query = document.getElementById('searchInput').value.toLowerCase();
+
+        feed.forEach(post => {
+            if (query && !post.title.toLowerCase().includes(query)) return;
+            
+            const uploader = users[post.uploader] || { avatar: '' };
+            const isSub = uploader.subscribers && uploader.subscribers.includes(currentUser.name);
+            const isLiked = post.likes.includes(currentUser.name);
+            const isHearted = post.hearts.includes(currentUser.name);
+
+            let contentHTML = '';
+
+            // VIDEO LOGIC
+            if (post.type === 'video') {
+                contentHTML = `
+                    <div class="media-wrapper" 
+                         onmouseenter="startPreview(${post.id})" 
+                         onmouseleave="stopPreview(${post.id})">
+                        
+                        <img id="thumb-${post.id}" class="video-thumbnail" src="${post.thumbnail || ''}">
+                        
+                        <video id="player-${post.id}" class="video-player" muted loop playsinline></video>
+                    </div>
+                `;
+            } 
+            else if (post.type === 'image') {
+                contentHTML = `<img id="img-${post.id}" class="image-post" src="">`;
+                setTimeout(async () => {
+                    const blob = await getMediaFromDB(post.id);
+                    if(blob) document.getElementById(`img-${post.id}`).src = URL.createObjectURL(blob);
+                }, 0);
+            }
+            else if (post.type === 'poll') {
+                const total = post.poll.votes.reduce((a,b)=>a+b, 0);
+                const voted = post.poll.voters && post.poll.voters.includes(currentUser.name);
+                const opts = post.poll.options.map((opt, i) => {
+                    const pct = total ? Math.round((post.poll.votes[i]/total)*100) : 0;
+                    return `<div class="poll-option" onclick="votePoll(${post.id}, ${i})">
+                                <div class="poll-bg" style="width:${voted?pct:0}%"></div>
+                                <div class="poll-content"><span>${opt}</span>${voted?`<span>${pct}%</span>`:''}</div>
+                            </div>`;
+                }).join('');
+                contentHTML = `<div class="poll-container"><div class="poll-question">${post.title}</div>${opts}</div>`;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'video-card';
+            div.innerHTML = `
+                ${contentHTML}
+                <div class="meta-data">
+                    ${post.type !== 'poll' ? `<span class="video-title">${post.title}</span>` : ''}
+                    ${post.description ? `<div class="video-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>` : ''}
+                    <div class="video-stats">${post.timestamp}</div>
+                    
+                    <div class="uploader-row">
+                        <div class="uploader-info">
+                            <img src="${uploader.avatar}" class="uploader-pic">
+                            <span class="uploader-name">${post.uploader}</span>
+                        </div>
+                        ${post.uploader !== currentUser.name ? 
+                        `<button class="sub-btn ${isSub ? 'subscribed':''}" onclick="toggleSub('${post.uploader}')">${isSub?'Subscribed':'Subscribe'}</button>`:''}
+                    </div>
+
+                    <div class="action-row">
+                        <div class="action-item ${isLiked?'liked':''}" onclick="toggleLike(${post.id})"><span class="action-icon">👍</span> ${post.likes.length}</div>
+                        <div class="action-item ${isHearted?'hearted':''}" onclick="toggleHeart(${post.id})"><span class="action-icon">❤️</span> ${post.hearts.length}</div>
+                        <div class="action-item" onclick="toggleComments(${post.id})"><span class="action-icon">💬</span> ${post.comments.length}</div>
+                    </div>
+
+                    <div id="comments-${post.id}" class="comments-area">
+                        <div class="comment-list">
+                            ${post.comments.map(c => `<div class="single-comment"><span class="comment-user">${c.user}</span> ${c.text}</div>`).join('')}
+                        </div>
+                        <div class="comment-input-row">
+                            <input type="text" id="input-${post.id}" class="comment-input" placeholder="Comment...">
+                            <button class="post-btn" onclick="postComment(${post.id})">Post</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    // --- PREVIEW LOGIC ---
+    async function startPreview(id) {
+        const vid = document.getElementById(`player-${id}`);
+        const thumb = document.getElementById(`thumb-${id}`);
+        if(!vid) return;
+
+        if (!vid.src) {
+            const blob = await getMediaFromDB(id);
+            if(blob) vid.src = URL.createObjectURL(blob);
+        }
+
+        thumb.style.opacity = '0'; // Hide thumb
+        vid.style.display = 'block'; // Show video
+        
+        // ADD NATIVE CONTROLS
+        vid.controls = true; 
+        
+        // Start muted
+        vid.muted = true;
+        vid.play().catch(()=>{});
+    }
+
+    function stopPreview(id) {
+        const vid = document.getElementById(`player-${id}`);
+        const thumb = document.getElementById(`thumb-${id}`);
+        
+        vid.pause();
+        vid.currentTime = 0; // Reset position
+        vid.style.display = 'none'; // Hide video
+        vid.controls = false; // Remove controls for cleaner look when hidden
+        thumb.style.opacity = '1'; // Show thumb
+    }
+
+    // --- INTERACTIONS ---
+    function votePoll(postId, idx) {
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        const post = feed.find(p => p.id === postId);
+        if (post && !post.poll.voters.includes(currentUser.name)) {
+            post.poll.votes[idx]++;
+            post.poll.voters.push(currentUser.name);
+            localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+            renderFeed();
+        }
+    }
+    
+    function toggleLike(id) {
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        const post = feed.find(p => p.id === id);
+        if(post.likes.includes(currentUser.name)) post.likes = post.likes.filter(n=>n!==currentUser.name);
+        else post.likes.push(currentUser.name);
+        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+        renderFeed();
+    }
+
+    function toggleHeart(id) {
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        const post = feed.find(p => p.id === id);
+        if(post.hearts.includes(currentUser.name)) post.hearts = post.hearts.filter(n=>n!==currentUser.name);
+        else post.hearts.push(currentUser.name);
+        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+        renderFeed();
+    }
+
+    function toggleSub(creator) {
+        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
+        const list = users[creator].subscribers || [];
+        if(list.includes(currentUser.name)) users[creator].subscribers = list.filter(n=>n!==currentUser.name);
+        else { if(!users[creator].subscribers) users[creator].subscribers = []; users[creator].subscribers.push(currentUser.name); }
+        localStorage.setItem('ZXY_Secure_Users', JSON.stringify(users));
+        renderFeed();
+    }
+
+    function toggleComments(id) { document.getElementById(`comments-${id}`).classList.toggle('show'); }
+
+    function postComment(id) {
+        const val = document.getElementById(`input-${id}`).value;
+        if(!val) return;
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        feed.find(p => p.id === id).comments.push({user: currentUser.name, text: val});
+        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+        renderFeed();
+    }
+
+    function openProfileModal() {
+        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
+        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
+        const user = users[currentUser.name];
+        let views = 0, likes = 0;
+        feed.filter(p => p.uploader === currentUser.name).forEach(p => { views += (p.views||0); likes += p.likes.length; });
+        document.getElementById('statsAvatar').src = user.avatar;
+        document.getElementById('statsName').innerText = currentUser.name;
+        document.getElementById('countSubs').innerText = user.subscribers ? user.subscribers.length : 0;
+        document.getElementById('countViews').innerText = views;
+        document.getElementById('countLikes').innerText = likes;
+        document.getElementById('profileModal').classList.add('active');
+    }
+
+    function clearAllData() {
+        if(prompt("Admin:") === "qwertyuiop") {
+            indexedDB.deleteDatabase(DB_NAME);
+            localStorage.clear();
+            location.reload();
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
