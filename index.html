@@ -89,9 +89,20 @@
         .tab-btn.active { color: white; border-bottom: 2px solid #ff0050; font-weight: bold; }
         .upload-section { display: none; }
         .upload-section.active { display: block; }
+
+        /* LOADING */
+        #loadingOverlay { position:fixed; top:0; left:0; width:100%; height:100%; background:#0f0f0f; z-index:9999; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; }
+        .spinner { width:30px; height:30px; border:3px solid #333; border-top-color:#ff0050; border-radius:50%; animation:spin 0.8s linear infinite; }
+        @keyframes spin { to { transform:rotate(360deg); } }
     </style>
 </head>
 <body>
+
+<!-- Loading overlay while Firebase initializes -->
+<div id="loadingOverlay">
+    <div style="font-weight:900; font-size:24px; background:linear-gradient(to right,#ff0050,#ff4b4b); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">ZXYwatch</div>
+    <div class="spinner"></div>
+</div>
 
 <div class="app-container">
     <div class="header">
@@ -119,8 +130,9 @@
         <form onsubmit="event.preventDefault(); attemptLogin();">
             <input type="text" id="usernameInput" class="input-field" placeholder="Username" required>
             <input type="password" id="passwordInput" class="input-field" placeholder="Password" required>
-            <button type="submit" class="primary-btn">Enter</button>
+            <button type="submit" id="loginBtn" class="primary-btn">Enter</button>
         </form>
+        <div id="loginError" style="color:#ff4b4b; font-size:13px; margin-top:10px;"></div>
     </div>
 </div>
 
@@ -149,7 +161,10 @@
         </div>
 
         <button id="postBtn" class="primary-btn" onclick="startUploadProcess()">Post</button>
-        <div id="uploadStatus" style="display:none; color:#3ea6ff; margin-top:10px; font-size:12px; text-align:center;">Processing Large File...</div>
+        <div id="uploadStatus" style="display:none; color:#3ea6ff; margin-top:10px; font-size:12px; text-align:center;">Processing...</div>
+        <div id="uploadProgress" style="display:none; background:#222; border-radius:4px; height:6px; margin-top:8px; overflow:hidden;">
+            <div id="progressBar" style="height:100%; background:#ff0050; width:0%; transition:width 0.3s;"></div>
+        </div>
         <button onclick="closeUploadModal()" style="width:100%; background:none; border:none; color:#aaa; margin-top:10px; cursor:pointer;">Cancel</button>
     </div>
 </div>
@@ -178,374 +193,475 @@
     </div>
 </div>
 
-<script>
-    // --- DATABASE ---
-    const DB_NAME = "ZXY_LargeStorage_v5"; // Supports larger files
-    const DB_VERSION = 1;
-    let db;
-    let currentUploadType = 'video';
+<!-- Firebase SDKs -->
+<script type="module">
+// ============================================================
+//   PASTE YOUR FIREBASE CONFIG HERE
+//   Get it from: Firebase Console → Project Settings → Your Apps → Web App
+// ============================================================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, addDoc, query, orderBy, onSnapshot, arrayUnion, arrayRemove, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-    function initDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(DB_NAME, DB_VERSION);
-            request.onupgradeneeded = e => {
-                db = e.target.result;
-                if (!db.objectStoreNames.contains("media")) db.createObjectStore("media", { keyPath: "id" });
-            };
-            request.onsuccess = e => { db = e.target.result; resolve(db); };
-            request.onerror = () => reject("DB Error");
-        });
+const firebaseConfig = {
+    // PASTE YOUR CONFIG VALUES BELOW:
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+// ============================================================
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+// Hide loading overlay once Firebase is ready
+document.getElementById('loadingOverlay').style.display = 'none';
+
+// --- GLOBALS ---
+let currentUser = null;
+let currentUploadType = 'video';
+let tempAvatar = "";
+let feedCache = []; // local cache so we can search without re-fetching
+
+// --- AUTH ---
+window.handleAvatarUpload = function(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => { tempAvatar = e.target.result; document.getElementById('loginPreview').src = tempAvatar; };
+        reader.readAsDataURL(input.files[0]);
     }
+};
 
-    function saveMediaToDB(id, blob) {
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(["media"], "readwrite");
-            tx.objectStore("media").put({ id: id, blob: blob });
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject();
-        });
-    }
+window.attemptLogin = async function() {
+    const name = document.getElementById('usernameInput').value.trim();
+    const pass = document.getElementById('passwordInput').value.trim();
+    const errEl = document.getElementById('loginError');
+    const btn = document.getElementById('loginBtn');
+    if (!name || !pass) return;
 
-    function getMediaFromDB(id) {
-        return new Promise(resolve => {
-            const tx = db.transaction(["media"], "readonly");
-            const req = tx.objectStore("media").get(id);
-            req.onsuccess = () => resolve(req.result ? req.result.blob : null);
-            req.onerror = () => resolve(null);
-        });
-    }
+    btn.disabled = true;
+    btn.innerText = "...";
+    errEl.innerText = "";
 
-    // --- AUTH ---
-    let currentUser = null;
-    let tempAvatar = "";
+    const userRef = doc(db, "users", name);
+    const userSnap = await getDoc(userRef);
 
-    async function init() {
-        await initDB(); 
-        const session = localStorage.getItem('ZXY_Current_Session');
-        if (session) {
-            currentUser = JSON.parse(session);
-            setupApp();
+    if (!userSnap.exists()) {
+        // New user — register
+        const avatar = tempAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=333&color=fff`;
+        await setDoc(userRef, { password: pass, avatar, subscribers: [], name });
+        currentUser = { name, avatar, subscribers: [] };
+    } else {
+        const data = userSnap.data();
+        if (data.password !== pass) {
+            errEl.innerText = "Wrong password.";
+            btn.disabled = false;
+            btn.innerText = "Enter";
+            return;
         }
+        currentUser = { name, ...data };
     }
 
-    function handleAvatarUpload(input) {
-        if (input.files && input.files[0]) {
-            const reader = new FileReader();
-            reader.onload = e => { tempAvatar = e.target.result; document.getElementById('loginPreview').src = tempAvatar; };
-            reader.readAsDataURL(input.files[0]);
-        }
-    }
+    sessionStorage.setItem('ZXY_Session', JSON.stringify({ name: currentUser.name, avatar: currentUser.avatar }));
+    setupApp();
+    btn.disabled = false;
+    btn.innerText = "Enter";
+};
 
-    function attemptLogin() {
-        const name = document.getElementById('usernameInput').value.trim();
-        const pass = document.getElementById('passwordInput').value.trim();
-        if (!name || !pass) return;
+function setupApp() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('headerAvatar').src = currentUser.avatar;
+    renderFeed();
+}
 
-        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
-        if (!users[name]) {
-            users[name] = { password: pass, avatar: tempAvatar || `https://ui-avatars.com/api/?name=${name}`, subscribers: [] };
-            localStorage.setItem('ZXY_Secure_Users', JSON.stringify(users));
-        } else if (users[name].password !== pass) return alert("Wrong password");
-        
-        currentUser = { name, ...users[name] };
-        localStorage.setItem('ZXY_Current_Session', JSON.stringify(currentUser));
-        setupApp();
-    }
+window.logout = function() { sessionStorage.removeItem('ZXY_Session'); location.reload(); };
 
-    function setupApp() {
-        document.getElementById('loginScreen').classList.add('hidden');
-        document.getElementById('headerAvatar').src = currentUser.avatar;
-        renderFeed();
-    }
+// Auto-login from session
+const session = sessionStorage.getItem('ZXY_Session');
+if (session) {
+    currentUser = JSON.parse(session);
+    setupApp();
+} else {
+    document.getElementById('loginScreen').classList.remove('hidden');
+}
 
-    function logout() { localStorage.removeItem('ZXY_Current_Session'); location.reload(); }
+// --- UPLOAD ---
+window.openUploadModal = function() { document.getElementById('uploadModal').classList.add('active'); };
+window.closeUploadModal = function() {
+    document.getElementById('uploadModal').classList.remove('active');
+    document.getElementById('uploadStatus').style.display = 'none';
+    document.getElementById('uploadProgress').style.display = 'none';
+    document.getElementById('postBtn').disabled = false;
+};
 
-    // --- UPLOAD & THUMBNAIL ---
-    function openUploadModal() { document.getElementById('uploadModal').classList.add('active'); }
-    function closeUploadModal() { 
-        document.getElementById('uploadModal').classList.remove('active'); 
-        document.getElementById('uploadStatus').style.display = 'none';
-        document.getElementById('postBtn').disabled = false;
-    }
+window.setUploadType = function(type) {
+    currentUploadType = type;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.upload-section').forEach(s => s.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(`sect-${type}`).classList.add('active');
+};
 
-    function setUploadType(type) {
-        currentUploadType = type;
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.upload-section').forEach(s => s.classList.remove('active'));
-        event.target.classList.add('active');
-        document.getElementById(`sect-${type}`).classList.add('active');
-    }
+function generateThumbnail(file) {
+    return new Promise(resolve => {
+        const video = document.createElement('video');
+        video.src = URL.createObjectURL(file);
+        video.currentTime = 1.0;
+        video.muted = true;
+        video.onseeked = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = (320 / video.videoWidth) * video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        video.onerror = () => resolve(null);
+    });
+}
 
-    function generateThumbnail(file) {
-        return new Promise(resolve => {
-            const video = document.createElement('video');
-            video.src = URL.createObjectURL(file);
-            video.currentTime = 1.0; 
-            video.muted = true;
-            video.onseeked = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = 320; 
-                canvas.height = (320 / video.videoWidth) * video.videoHeight;
-                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL('image/jpeg', 0.7));
-            };
-            video.onerror = () => resolve(null);
-        });
-    }
+function uploadFileToStorage(file, path, onProgress) {
+    return new Promise((resolve, reject) => {
+        const storageRef = ref(storage, path);
+        const task = uploadBytesResumable(storageRef, file);
+        task.on('state_changed',
+            snap => onProgress && onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+            reject,
+            async () => resolve(await getDownloadURL(task.snapshot.ref))
+        );
+    });
+}
 
-    async function startUploadProcess() {
-        const title = document.getElementById('postTitle').value.trim();
-        const desc = document.getElementById('postDesc').value.trim();
-        const postId = Date.now();
-        let fileToSave = null, thumbnail = null, pollData = null;
+window.startUploadProcess = async function() {
+    const title = document.getElementById('postTitle').value.trim();
+    const desc = document.getElementById('postDesc').value.trim();
+    if (!title) return alert("Please add a title.");
 
-        if (!title) return alert("Please add a title.");
+    const btn = document.getElementById('postBtn');
+    const statusEl = document.getElementById('uploadStatus');
+    const progressEl = document.getElementById('uploadProgress');
+    const bar = document.getElementById('progressBar');
+    btn.disabled = true;
+    statusEl.style.display = 'block';
+    progressEl.style.display = 'none';
 
-        const btn = document.getElementById('postBtn');
-        btn.disabled = true;
-        document.getElementById('uploadStatus').style.display = 'block';
+    let mediaURL = null, thumbnail = null, pollData = null;
+    const postId = Date.now().toString();
 
+    try {
         if (currentUploadType === 'video') {
             const file = document.getElementById('vidFile').files[0];
             if (!file) { btn.disabled = false; return alert("Select a video."); }
-            fileToSave = file;
-            document.getElementById('uploadStatus').innerText = "Generating Preview...";
+
+            statusEl.innerText = "Generating preview...";
             thumbnail = await generateThumbnail(file);
-        } 
-        else if (currentUploadType === 'image') {
-            fileToSave = document.getElementById('imgFile').files[0];
-            if (!fileToSave) { btn.disabled = false; return alert("Select an image."); }
-        } 
-        else if (currentUploadType === 'poll') {
+
+            statusEl.innerText = "Uploading video...";
+            progressEl.style.display = 'block';
+            mediaURL = await uploadFileToStorage(file, `media/${postId}_video`, pct => { bar.style.width = pct + '%'; });
+
+        } else if (currentUploadType === 'image') {
+            const file = document.getElementById('imgFile').files[0];
+            if (!file) { btn.disabled = false; return alert("Select an image."); }
+            statusEl.innerText = "Uploading image...";
+            progressEl.style.display = 'block';
+            mediaURL = await uploadFileToStorage(file, `media/${postId}_image`, pct => { bar.style.width = pct + '%'; });
+
+        } else if (currentUploadType === 'poll') {
             const o1 = document.getElementById('pollOpt1').value.trim();
             const o2 = document.getElementById('pollOpt2').value.trim();
             if (!o1 || !o2) { btn.disabled = false; return alert("2 options required."); }
             pollData = { options: [o1, o2], votes: [0, 0], voters: [] };
         }
 
-        document.getElementById('uploadStatus').innerText = "Saving Large File...";
+        statusEl.innerText = "Saving post...";
 
         const newPost = {
             id: postId,
             type: currentUploadType,
-            title: title,
+            title,
             description: desc,
             uploader: currentUser.name,
+            uploaderAvatar: currentUser.avatar,
             timestamp: new Date().toLocaleDateString(),
-            thumbnail: thumbnail,
-            likes: [], hearts: [], comments: [], poll: pollData, views: 0
+            thumbnail: thumbnail || null,
+            mediaURL: mediaURL || null,
+            likes: [],
+            hearts: [],
+            comments: [],
+            poll: pollData,
+            views: 0,
+            createdAt: Date.now()
         };
 
-        if (fileToSave) await saveMediaToDB(postId, fileToSave);
-
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        feed.unshift(newPost);
-        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
+        await setDoc(doc(db, "posts", postId), newPost);
 
         closeUploadModal();
         document.getElementById('postTitle').value = "";
         document.getElementById('postDesc').value = "";
         document.getElementById('vidFile').value = "";
-        btn.innerText = "Post";
         renderFeed();
+
+    } catch (err) {
+        console.error(err);
+        alert("Upload failed: " + err.message);
+        btn.disabled = false;
+        statusEl.style.display = 'none';
+    }
+};
+
+// --- RENDER ---
+window.renderFeed = async function() {
+    const container = document.getElementById('videoFeed');
+    const query2 = document.getElementById('searchInput').value.toLowerCase();
+
+    // If cache is empty, fetch from Firestore
+    if (feedCache.length === 0) {
+        const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+        const snap = await getDocs(q);
+        feedCache = snap.docs.map(d => d.data());
     }
 
-    // --- RENDER & PREVIEW LOGIC ---
-    function renderFeed() {
-        const container = document.getElementById('videoFeed');
-        container.innerHTML = "";
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
-        const query = document.getElementById('searchInput').value.toLowerCase();
+    container.innerHTML = "";
+    const feed = feedCache.filter(p => !query2 || p.title.toLowerCase().includes(query2));
 
-        feed.forEach(post => {
-            if (query && !post.title.toLowerCase().includes(query)) return;
-            
-            const uploader = users[post.uploader] || { avatar: '' };
-            const isSub = uploader.subscribers && uploader.subscribers.includes(currentUser.name);
-            const isLiked = post.likes.includes(currentUser.name);
-            const isHearted = post.hearts.includes(currentUser.name);
+    if (feed.length === 0) {
+        container.innerHTML = `<div style="text-align:center; color:#555; padding:60px 20px;">No posts yet. Be the first to post!</div>`;
+        return;
+    }
 
-            let contentHTML = '';
+    feed.forEach(post => {
+        const isSub = false; // Handled per-click for simplicity
+        const isLiked = post.likes && post.likes.includes(currentUser.name);
+        const isHearted = post.hearts && post.hearts.includes(currentUser.name);
 
-            // VIDEO LOGIC
-            if (post.type === 'video') {
-                contentHTML = `
-                    <div class="media-wrapper" 
-                         onmouseenter="startPreview(${post.id})" 
-                         onmouseleave="stopPreview(${post.id})">
-                        
-                        <img id="thumb-${post.id}" class="video-thumbnail" src="${post.thumbnail || ''}">
-                        
-                        <video id="player-${post.id}" class="video-player" muted loop playsinline></video>
-                    </div>
-                `;
-            } 
-            else if (post.type === 'image') {
-                contentHTML = `<img id="img-${post.id}" class="image-post" src="">`;
-                setTimeout(async () => {
-                    const blob = await getMediaFromDB(post.id);
-                    if(blob) document.getElementById(`img-${post.id}`).src = URL.createObjectURL(blob);
-                }, 0);
-            }
-            else if (post.type === 'poll') {
-                const total = post.poll.votes.reduce((a,b)=>a+b, 0);
-                const voted = post.poll.voters && post.poll.voters.includes(currentUser.name);
-                const opts = post.poll.options.map((opt, i) => {
-                    const pct = total ? Math.round((post.poll.votes[i]/total)*100) : 0;
-                    return `<div class="poll-option" onclick="votePoll(${post.id}, ${i})">
-                                <div class="poll-bg" style="width:${voted?pct:0}%"></div>
-                                <div class="poll-content"><span>${opt}</span>${voted?`<span>${pct}%</span>`:''}</div>
-                            </div>`;
-                }).join('');
-                contentHTML = `<div class="poll-container"><div class="poll-question">${post.title}</div>${opts}</div>`;
-            }
+        let contentHTML = '';
 
-            const div = document.createElement('div');
-            div.className = 'video-card';
-            div.innerHTML = `
-                ${contentHTML}
-                <div class="meta-data">
-                    ${post.type !== 'poll' ? `<span class="video-title">${post.title}</span>` : ''}
-                    ${post.description ? `<div class="video-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>` : ''}
-                    <div class="video-stats">${post.timestamp}</div>
-                    
-                    <div class="uploader-row">
-                        <div class="uploader-info">
-                            <img src="${uploader.avatar}" class="uploader-pic">
-                            <span class="uploader-name">${post.uploader}</span>
-                        </div>
-                        ${post.uploader !== currentUser.name ? 
-                        `<button class="sub-btn ${isSub ? 'subscribed':''}" onclick="toggleSub('${post.uploader}')">${isSub?'Subscribed':'Subscribe'}</button>`:''}
-                    </div>
-
-                    <div class="action-row">
-                        <div class="action-item ${isLiked?'liked':''}" onclick="toggleLike(${post.id})"><span class="action-icon">👍</span> ${post.likes.length}</div>
-                        <div class="action-item ${isHearted?'hearted':''}" onclick="toggleHeart(${post.id})"><span class="action-icon">❤️</span> ${post.hearts.length}</div>
-                        <div class="action-item" onclick="toggleComments(${post.id})"><span class="action-icon">💬</span> ${post.comments.length}</div>
-                    </div>
-
-                    <div id="comments-${post.id}" class="comments-area">
-                        <div class="comment-list">
-                            ${post.comments.map(c => `<div class="single-comment"><span class="comment-user">${c.user}</span> ${c.text}</div>`).join('')}
-                        </div>
-                        <div class="comment-input-row">
-                            <input type="text" id="input-${post.id}" class="comment-input" placeholder="Comment...">
-                            <button class="post-btn" onclick="postComment(${post.id})">Post</button>
-                        </div>
-                    </div>
+        if (post.type === 'video') {
+            contentHTML = `
+                <div class="media-wrapper" 
+                     onmouseenter="startPreview('${post.id}', '${post.mediaURL}')" 
+                     onmouseleave="stopPreview('${post.id}')">
+                    <img id="thumb-${post.id}" class="video-thumbnail" src="${post.thumbnail || ''}">
+                    <video id="player-${post.id}" class="video-player" muted loop playsinline></video>
                 </div>
             `;
-            container.appendChild(div);
-        });
-    }
-
-    // --- PREVIEW LOGIC ---
-    async function startPreview(id) {
-        const vid = document.getElementById(`player-${id}`);
-        const thumb = document.getElementById(`thumb-${id}`);
-        if(!vid) return;
-
-        if (!vid.src) {
-            const blob = await getMediaFromDB(id);
-            if(blob) vid.src = URL.createObjectURL(blob);
+        } else if (post.type === 'image') {
+            contentHTML = `<img class="image-post" src="${post.mediaURL || ''}">`;
+        } else if (post.type === 'poll') {
+            const total = post.poll.votes.reduce((a, b) => a + b, 0);
+            const voted = post.poll.voters && post.poll.voters.includes(currentUser.name);
+            const opts = post.poll.options.map((opt, i) => {
+                const pct = total ? Math.round((post.poll.votes[i] / total) * 100) : 0;
+                return `<div class="poll-option" onclick="votePoll('${post.id}', ${i})">
+                            <div class="poll-bg" style="width:${voted ? pct : 0}%"></div>
+                            <div class="poll-content"><span>${opt}</span>${voted ? `<span>${pct}%</span>` : ''}</div>
+                        </div>`;
+            }).join('');
+            contentHTML = `<div class="poll-container"><div class="poll-question">${post.title}</div>${opts}</div>`;
         }
 
-        thumb.style.opacity = '0'; // Hide thumb
-        vid.style.display = 'block'; // Show video
-        
-        // ADD NATIVE CONTROLS
-        vid.controls = true; 
-        
-        // Start muted
-        vid.muted = true;
-        vid.play().catch(()=>{});
-    }
+        const div = document.createElement('div');
+        div.className = 'video-card';
+        div.innerHTML = `
+            ${contentHTML}
+            <div class="meta-data">
+                ${post.type !== 'poll' ? `<span class="video-title">${post.title}</span>` : ''}
+                ${post.description ? `<div class="video-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>` : ''}
+                <div class="video-stats">${post.timestamp}</div>
+                
+                <div class="uploader-row">
+                    <div class="uploader-info">
+                        <img src="${post.uploaderAvatar || ''}" class="uploader-pic">
+                        <span class="uploader-name">${post.uploader}</span>
+                    </div>
+                    ${post.uploader !== currentUser.name ? 
+                    `<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}', '${post.id}')">Subscribe</button>` : ''}
+                </div>
 
-    function stopPreview(id) {
-        const vid = document.getElementById(`player-${id}`);
-        const thumb = document.getElementById(`thumb-${id}`);
-        
-        vid.pause();
-        vid.currentTime = 0; // Reset position
-        vid.style.display = 'none'; // Hide video
-        vid.controls = false; // Remove controls for cleaner look when hidden
-        thumb.style.opacity = '1'; // Show thumb
-    }
+                <div class="action-row">
+                    <div class="action-item ${isLiked ? 'liked' : ''}" id="like-${post.id}" onclick="toggleLike('${post.id}')"><span class="action-icon">👍</span> <span id="likeCount-${post.id}">${(post.likes || []).length}</span></div>
+                    <div class="action-item ${isHearted ? 'hearted' : ''}" id="heart-${post.id}" onclick="toggleHeart('${post.id}')"><span class="action-icon">❤️</span> <span id="heartCount-${post.id}">${(post.hearts || []).length}</span></div>
+                    <div class="action-item" onclick="toggleComments('${post.id}')"><span class="action-icon">💬</span> <span id="commentCount-${post.id}">${(post.comments || []).length}</span></div>
+                </div>
 
-    // --- INTERACTIONS ---
-    function votePoll(postId, idx) {
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        const post = feed.find(p => p.id === postId);
-        if (post && !post.poll.voters.includes(currentUser.name)) {
-            post.poll.votes[idx]++;
-            post.poll.voters.push(currentUser.name);
-            localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
-            renderFeed();
+                <div id="comments-${post.id}" class="comments-area">
+                    <div class="comment-list" id="commentList-${post.id}">
+                        ${(post.comments || []).map(c => `<div class="single-comment"><span class="comment-user">${c.user}</span> ${c.text}</div>`).join('')}
+                    </div>
+                    <div class="comment-input-row">
+                        <input type="text" id="input-${post.id}" class="comment-input" placeholder="Comment...">
+                        <button class="post-btn" onclick="postComment('${post.id}')">Post</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.appendChild(div);
+
+        // Check subscription status
+        if (post.uploader !== currentUser.name) {
+            getDoc(doc(db, "users", post.uploader)).then(snap => {
+                if (snap.exists()) {
+                    const subs = snap.data().subscribers || [];
+                    const btn = document.getElementById(`sub-${post.id}`);
+                    if (btn) {
+                        if (subs.includes(currentUser.name)) { btn.innerText = 'Subscribed'; btn.classList.add('subscribed'); }
+                        else { btn.innerText = 'Subscribe'; btn.classList.remove('subscribed'); }
+                    }
+                }
+            });
         }
-    }
-    
-    function toggleLike(id) {
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        const post = feed.find(p => p.id === id);
-        if(post.likes.includes(currentUser.name)) post.likes = post.likes.filter(n=>n!==currentUser.name);
-        else post.likes.push(currentUser.name);
-        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
-        renderFeed();
+    });
+};
+
+// Subscribe to real-time feed updates
+onSnapshot(query(collection(db, "posts"), orderBy("createdAt", "desc")), snap => {
+    feedCache = snap.docs.map(d => d.data());
+    if (currentUser) renderFeed();
+});
+
+// --- VIDEO PREVIEW ---
+window.startPreview = async function(id, mediaURL) {
+    const vid = document.getElementById(`player-${id}`);
+    const thumb = document.getElementById(`thumb-${id}`);
+    if (!vid) return;
+    if (!vid.src && mediaURL) vid.src = mediaURL;
+    thumb.style.opacity = '0';
+    vid.style.display = 'block';
+    vid.controls = true;
+    vid.muted = true;
+    vid.play().catch(() => {});
+};
+
+window.stopPreview = function(id) {
+    const vid = document.getElementById(`player-${id}`);
+    const thumb = document.getElementById(`thumb-${id}`);
+    vid.pause();
+    vid.currentTime = 0;
+    vid.style.display = 'none';
+    vid.controls = false;
+    thumb.style.opacity = '1';
+};
+
+// --- INTERACTIONS ---
+window.votePoll = async function(postId, idx) {
+    const postRef = doc(db, "posts", postId);
+    const postSnap = await getDoc(postRef);
+    const post = postSnap.data();
+    if (post.poll.voters && post.poll.voters.includes(currentUser.name)) return;
+
+    const newVotes = [...post.poll.votes];
+    newVotes[idx]++;
+    const newVoters = [...(post.poll.voters || []), currentUser.name];
+    await updateDoc(postRef, { "poll.votes": newVotes, "poll.voters": newVoters });
+
+    // Update cache
+    const idx2 = feedCache.findIndex(p => p.id === postId);
+    if (idx2 !== -1) { feedCache[idx2].poll.votes = newVotes; feedCache[idx2].poll.voters = newVoters; }
+    renderFeed();
+};
+
+window.toggleLike = async function(id) {
+    const postRef = doc(db, "posts", id);
+    const post = feedCache.find(p => p.id === id);
+    const isLiked = post && post.likes && post.likes.includes(currentUser.name);
+
+    if (isLiked) {
+        await updateDoc(postRef, { likes: arrayRemove(currentUser.name) });
+        post.likes = post.likes.filter(n => n !== currentUser.name);
+    } else {
+        await updateDoc(postRef, { likes: arrayUnion(currentUser.name) });
+        if (!post.likes) post.likes = [];
+        post.likes.push(currentUser.name);
     }
 
-    function toggleHeart(id) {
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        const post = feed.find(p => p.id === id);
-        if(post.hearts.includes(currentUser.name)) post.hearts = post.hearts.filter(n=>n!==currentUser.name);
-        else post.hearts.push(currentUser.name);
-        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
-        renderFeed();
+    const el = document.getElementById(`like-${id}`);
+    const countEl = document.getElementById(`likeCount-${id}`);
+    if (el) { isLiked ? el.classList.remove('liked') : el.classList.add('liked'); }
+    if (countEl) countEl.innerText = post.likes.length;
+};
+
+window.toggleHeart = async function(id) {
+    const postRef = doc(db, "posts", id);
+    const post = feedCache.find(p => p.id === id);
+    const isHearted = post && post.hearts && post.hearts.includes(currentUser.name);
+
+    if (isHearted) {
+        await updateDoc(postRef, { hearts: arrayRemove(currentUser.name) });
+        post.hearts = post.hearts.filter(n => n !== currentUser.name);
+    } else {
+        await updateDoc(postRef, { hearts: arrayUnion(currentUser.name) });
+        if (!post.hearts) post.hearts = [];
+        post.hearts.push(currentUser.name);
     }
 
-    function toggleSub(creator) {
-        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
-        const list = users[creator].subscribers || [];
-        if(list.includes(currentUser.name)) users[creator].subscribers = list.filter(n=>n!==currentUser.name);
-        else { if(!users[creator].subscribers) users[creator].subscribers = []; users[creator].subscribers.push(currentUser.name); }
-        localStorage.setItem('ZXY_Secure_Users', JSON.stringify(users));
-        renderFeed();
+    const el = document.getElementById(`heart-${id}`);
+    const countEl = document.getElementById(`heartCount-${id}`);
+    if (el) { isHearted ? el.classList.remove('hearted') : el.classList.add('hearted'); }
+    if (countEl) countEl.innerText = post.hearts.length;
+};
+
+window.toggleSub = async function(creator, postId) {
+    const userRef = doc(db, "users", creator);
+    const snap = await getDoc(userRef);
+    const subs = snap.data().subscribers || [];
+    const btn = document.getElementById(`sub-${postId}`);
+
+    if (subs.includes(currentUser.name)) {
+        await updateDoc(userRef, { subscribers: arrayRemove(currentUser.name) });
+        if (btn) { btn.innerText = 'Subscribe'; btn.classList.remove('subscribed'); }
+    } else {
+        await updateDoc(userRef, { subscribers: arrayUnion(currentUser.name) });
+        if (btn) { btn.innerText = 'Subscribed'; btn.classList.add('subscribed'); }
     }
+};
 
-    function toggleComments(id) { document.getElementById(`comments-${id}`).classList.toggle('show'); }
+window.toggleComments = function(id) { document.getElementById(`comments-${id}`).classList.toggle('show'); };
 
-    function postComment(id) {
-        const val = document.getElementById(`input-${id}`).value;
-        if(!val) return;
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        feed.find(p => p.id === id).comments.push({user: currentUser.name, text: val});
-        localStorage.setItem('ZXY_Feed_Meta_v5', JSON.stringify(feed));
-        renderFeed();
+window.postComment = async function(id) {
+    const val = document.getElementById(`input-${id}`).value.trim();
+    if (!val) return;
+    const postRef = doc(db, "posts", id);
+    const comment = { user: currentUser.name, text: val };
+    await updateDoc(postRef, { comments: arrayUnion(comment) });
+
+    // Update local cache
+    const post = feedCache.find(p => p.id === id);
+    if (post) { if (!post.comments) post.comments = []; post.comments.push(comment); }
+
+    // Update DOM directly (no full re-render)
+    const list = document.getElementById(`commentList-${id}`);
+    if (list) list.innerHTML += `<div class="single-comment"><span class="comment-user">${comment.user}</span> ${comment.text}</div>`;
+    const countEl = document.getElementById(`commentCount-${id}`);
+    if (countEl && post) countEl.innerText = post.comments.length;
+    document.getElementById(`input-${id}`).value = "";
+};
+
+window.openProfileModal = async function() {
+    const userRef = doc(db, "users", currentUser.name);
+    const snap = await getDoc(userRef);
+    const user = snap.data();
+    const myPosts = feedCache.filter(p => p.uploader === currentUser.name);
+    let views = 0, likes = 0;
+    myPosts.forEach(p => { views += (p.views || 0); likes += (p.likes || []).length; });
+
+    document.getElementById('statsAvatar').src = user.avatar;
+    document.getElementById('statsName').innerText = currentUser.name;
+    document.getElementById('countSubs').innerText = (user.subscribers || []).length;
+    document.getElementById('countViews').innerText = views;
+    document.getElementById('countLikes').innerText = likes;
+    document.getElementById('profileModal').classList.add('active');
+};
+
+window.clearAllData = function() {
+    if (prompt("Admin:") === "qwertyuiop") {
+        alert("To fully reset, delete collections in your Firebase Console.");
     }
+};
 
-    function openProfileModal() {
-        const users = JSON.parse(localStorage.getItem('ZXY_Secure_Users') || '{}');
-        const feed = JSON.parse(localStorage.getItem('ZXY_Feed_Meta_v5') || '[]');
-        const user = users[currentUser.name];
-        let views = 0, likes = 0;
-        feed.filter(p => p.uploader === currentUser.name).forEach(p => { views += (p.views||0); likes += p.likes.length; });
-        document.getElementById('statsAvatar').src = user.avatar;
-        document.getElementById('statsName').innerText = currentUser.name;
-        document.getElementById('countSubs').innerText = user.subscribers ? user.subscribers.length : 0;
-        document.getElementById('countViews').innerText = views;
-        document.getElementById('countLikes').innerText = likes;
-        document.getElementById('profileModal').classList.add('active');
-    }
-
-    function clearAllData() {
-        if(prompt("Admin:") === "qwertyuiop") {
-            indexedDB.deleteDatabase(DB_NAME);
-            localStorage.clear();
-            location.reload();
-        }
-    }
-
-    init();
 </script>
 </body>
 </html>
