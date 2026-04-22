@@ -307,11 +307,12 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
 <div id="loginScreen" class="screen hidden">
   <div class="center-box">
     <div style="font-weight:900;font-size:28px;margin-bottom:28px;background:linear-gradient(to right,#ff0050,#ff4b4b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">ZXYwatch</div>
-    <label style="cursor:pointer;display:inline-block;margin-bottom:18px;">
+    <label id="avatarLabel" style="cursor:pointer;display:inline-block;margin-bottom:18px;">
       <img id="loginPreview" src="https://ui-avatars.com/api/?name=?&background=333&color=fff" style="width:76px;height:76px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);">
       <input type="file" id="avatarFile" style="display:none" accept="image/*" onchange="previewAvatar(this)">
       <div style="font-size:11px;color:var(--text2);margin-top:4px;">Tap to add photo</div>
     </label>
+    <div id="loginModeLabel" style="font-size:13px;color:var(--text2);margin-bottom:14px;">Create a new account</div>
     <form onsubmit="event.preventDefault();attemptLogin();">
       <input id="loginUser" class="field" placeholder="Username" required autocomplete="off">
       <input id="loginPass" class="field" type="password" placeholder="Password" required>
@@ -322,6 +323,10 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
       <button type="submit" id="loginBtn" class="btn-primary">Enter</button>
     </form>
     <div id="loginErr" class="err"></div>
+    <div style="margin-top:18px;display:flex;align-items:center;justify-content:center;gap:6px;">
+      <span id="loginToggleText" style="font-size:13px;color:var(--text2);">Already have an account?</span>
+      <button id="loginToggleBtn" onclick="toggleLoginMode()" class="btn-ghost" style="color:var(--blue);font-weight:700;font-size:13px;padding:0;text-decoration:underline;">Sign in</button>
+    </div>
   </div>
 </div>
 
@@ -468,7 +473,7 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const H = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
 
 const REACTIONS = ["❤️","👍","👎","🔥","💧","🙏","🧻","✔","❌","🤣","😭","🙄","😬","🤫","🤔","👿","😈","😂","☠","😮","😩","🤧","🤮","😢","🌐","🗑","⌚","🚫","⚠️","🎉"];
-const TENOR_KEY = "AIzaSyAyimkuYQYF_FXVALexPQnzfKEyKqv7imQ"; // free Tenor API key
+const TENOR_KEY = "AIzaSyAyimkuYQYF_FXVALexPQnzfKEyKqv7imQ";
 
 let currentUser = null;
 let allPosts = [];
@@ -478,6 +483,7 @@ let currentUploadType = "video";
 let currentChatType = "dm";
 let msgReactTargetId = null;
 let chatPollInterval = null;
+let loginSignInOnly = false;
 
 // ---- SUPABASE HELPERS ----
 async function dbGet(table, qs="") {
@@ -513,14 +519,12 @@ async function uploadFile(bucket, path, file, onProgress) {
 
 // ---- INIT ----
 async function init() {
-  // Build emoji panel
   const ep = document.getElementById('emojiPanel');
   REACTIONS.forEach(e=>{ const b=document.createElement('button'); b.className='emoji-btn'; b.innerText=e; b.onclick=()=>{ document.getElementById('chatMsgInput').value+=e; ep.classList.remove('show'); }; ep.appendChild(b); });
 
   const stored = localStorage.getItem('zxy_user') || sessionStorage.getItem('zxy_user');
   if (stored) {
     currentUser = JSON.parse(stored);
-    // Check PIN
     if (currentUser.pin) { showPinScreen(); return; }
     await finishInit();
   } else {
@@ -545,6 +549,15 @@ window.previewAvatar = function(input) {
   if(input.files[0]) { const r=new FileReader(); r.onload=e=>document.getElementById('loginPreview').src=e.target.result; r.readAsDataURL(input.files[0]); }
 };
 
+window.toggleLoginMode = function() {
+  loginSignInOnly = !loginSignInOnly;
+  document.getElementById('loginModeLabel').innerText = loginSignInOnly ? 'Sign in to your account' : 'Create a new account';
+  document.getElementById('loginToggleText').innerText = loginSignInOnly ? "Don't have an account?" : "Already have an account?";
+  document.getElementById('loginToggleBtn').innerText = loginSignInOnly ? "Create account" : "Sign in";
+  document.getElementById('avatarLabel').style.display = loginSignInOnly ? 'none' : 'inline-block';
+  document.getElementById('loginErr').innerText = '';
+};
+
 window.attemptLogin = async function() {
   const name = document.getElementById('loginUser').value.trim().toLowerCase().replace(/\s+/g,'_');
   const pass = document.getElementById('loginPass').value;
@@ -555,6 +568,11 @@ window.attemptLogin = async function() {
   btn.disabled=true; btn.innerText="...";
 
   let existing = await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=*`);
+
+  if(loginSignInOnly && (!existing || existing.length === 0)) {
+    err.innerText="No account found with that username."; btn.disabled=false; btn.innerText="Enter"; return;
+  }
+
   if(!existing||existing.length===0) {
     let avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=333&color=fff`;
     const af = document.getElementById('avatarFile').files[0];
@@ -709,7 +727,6 @@ function buildPostCard(post) {
       </div>
     </div>`;
 
-  // Load sub status
   if(!isSelf) {
     dbGet("users",`username=eq.${encodeURIComponent(post.uploader)}&select=subscribers`).then(rows=>{
       const btn=document.getElementById(`sub-${post.id}`);
@@ -735,7 +752,6 @@ window.startVid = function(id) {
   if(thumb) thumb.style.opacity='0';
   vid.style.display='block'; vid.controls=true; vid.muted=true;
   vid.play().catch(()=>{});
-  // Increment view count
   dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{views:(post.views||0)+1});
   post.views=(post.views||0)+1;
 };
@@ -916,7 +932,7 @@ window.renderChats = async function() {
   const container=document.getElementById('chatList');
   const visible=allChats.filter(c=>{
     const isMember=(c.members||[]).includes(currentUser.name);
-    if(c.is_private&&!isMember) return true; // show locked but unenterable
+    if(c.is_private&&!isMember) return true;
     return !q||(c.name||'').toLowerCase().includes(q);
   });
   if(!visible.length) { container.innerHTML=`<div class="empty">No chats yet. Tap + to start one.</div>`; return; }
