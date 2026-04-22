@@ -309,7 +309,8 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
     <div style="padding:14px;">
       <button class="btn-primary" style="background:var(--bg4);color:white;" onclick="logout()">Log Out</button>
       <div id="noahReports" style="display:none;margin-top:14px;">
-        <div style="font-size:14px;font-weight:700;margin-bottom:10px;color:var(--accent);">🛡 Reports (Owner)</div>
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--accent);">🛡 Owner Dashboard</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:12px;">All user reports submitted across ZXYwatch</div>
         <div id="reportsList"></div>
       </div>
     </div>
@@ -430,12 +431,35 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
   <div class="modal-box">
     <div class="modal-title">Report Post</div>
     <input type="hidden" id="reportPostId">
-    <select id="reportReason" class="field">
-      <option value="spam">Spam</option><option value="harassment">Harassment</option>
-      <option value="inappropriate">Inappropriate content</option><option value="misinformation">Misinformation</option>
-      <option value="other">Other</option>
-    </select>
-    <textarea id="reportDetail" class="field" rows="3" placeholder="Details (optional)..."></textarea>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Select all that apply:</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-spam">
+        <input type="checkbox" id="rc-spam" value="spam" onchange="styleReportCheck('spam')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">🗑 Spam</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-harassment">
+        <input type="checkbox" id="rc-harassment" value="harassment" onchange="styleReportCheck('harassment')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">😠 Harassment or bullying</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-inappropriate">
+        <input type="checkbox" id="rc-inappropriate" value="inappropriate" onchange="styleReportCheck('inappropriate')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">🔞 Inappropriate content</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-misinformation">
+        <input type="checkbox" id="rc-misinformation" value="misinformation" onchange="styleReportCheck('misinformation')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">📢 Misinformation</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-violence">
+        <input type="checkbox" id="rc-violence" value="violence" onchange="styleReportCheck('violence')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">⚠️ Violence or dangerous content</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border);" id="rl-other">
+        <input type="checkbox" id="rc-other" value="other" onchange="styleReportCheck('other')" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        <span style="font-size:13px;">❓ Other</span>
+      </label>
+    </div>
+    <textarea id="reportDetail" class="field" rows="3" placeholder="Description (optional) — give more details here..."></textarea>
+    <div id="reportErr" style="color:var(--accent);font-size:12px;min-height:16px;margin-bottom:8px;"></div>
     <button class="btn-primary" onclick="submitReport()">Send Report</button>
     <button onclick="closeModal('reportModal')" class="btn-ghost" style="width:100%;margin-top:8px;">Cancel</button>
   </div>
@@ -520,7 +544,8 @@ async function dbPost(t,b){const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{metho
 async function dbPatch(t,q,b){const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"PATCH",headers:H,body:JSON.stringify(b)});if(!r.ok){console.error(await r.text());return null;}return r.json();}
 async function uploadFile(bucket,path,file,onProg){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open("POST",`${SUPA_URL}/storage/v1/object/${bucket}/${path}`);x.setRequestHeader("apikey",SUPA_KEY);x.setRequestHeader("Authorization",`Bearer ${SUPA_KEY}`);x.upload.onprogress=e=>{if(e.lengthComputable&&onProg)onProg(Math.round(e.loaded/e.total*100));};x.onload=()=>{if(x.status>=200&&x.status<300)res(`${SUPA_URL}/storage/v1/object/public/${bucket}/${path}`);else rej(new Error(x.responseText));};x.onerror=()=>rej(new Error("Upload failed"));const fd=new FormData();fd.append("",file);x.send(fd);});}
 
-function me(){return currentUser?.name||currentUser?.username||'';}
+function me(){return currentUser?.username||currentUser?.name||'';}
+function isOwner(){return currentUser?.isOwner===true||me()==='zxy';}
 
 async function init(){
   const ep=document.getElementById('emojiPanel');
@@ -533,10 +558,15 @@ async function init(){
 async function finishInit(){
   document.getElementById('loadingOverlay').style.display='none';
   document.getElementById('headerAvatar').src=currentUser.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(me())}&background=333&color=fff`;
-  try{const r=await dbGet("users",`username=eq.${encodeURIComponent(me())}&select=following`);myFollowing=r[0]?.following||[];}catch(e){myFollowing=[];}
+  try{
+    if(!isOwner()){
+      const r=await dbGet("users",`username=eq.${encodeURIComponent(me())}&select=following`);
+      myFollowing=r[0]?.following||[];
+    }
+  }catch(e){myFollowing=[];}
   try{readNotifIds=new Set(JSON.parse(localStorage.getItem(`zxy_read_${me()}`)||'[]'));}catch(e){readNotifIds=new Set();}
   await loadPosts();renderFeed();await renderChats();renderProfile();renderCreator();updateNotifBadge();
-  if(me()==='noah')loadReports();
+  if(isOwner())loadReports();
 }
 
 window.previewAvatar=function(i){if(i.files[0]){const r=new FileReader();r.onload=e=>document.getElementById('loginPreview').src=e.target.result;r.readAsDataURL(i.files[0]);}};
@@ -556,13 +586,35 @@ window.attemptLogin=async function(){
   const keep=document.getElementById('loginKeepToggle').checked;
   const err=document.getElementById('loginErr');const btn=document.getElementById('loginBtn');
   err.innerText='';if(!name||!pass)return;btn.disabled=true;btn.innerText='...';
-  let existing=await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=*`);
+
+  // Hardcoded ZXY owner account — never hits the DB for auth
+  if(name==='zxy'&&pass==='happymeal'){
+    currentUser={username:'zxy',name:'zxy',avatar:'https://ui-avatars.com/api/?name=ZXY&background=ff0050&color=fff',subscribers:[],following:[],isOwner:true,keep};
+    const store=keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));
+    document.getElementById('loginScreen').classList.add('hidden');btn.disabled=false;btn.innerText="Enter";
+    await finishInit();return;
+  }
+
+  let existing=[];
+  try{existing=await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=*`);}catch(e){existing=[];}
   if(loginSignInOnly&&(!existing||existing.length===0)){err.innerText="No account found.";btn.disabled=false;btn.innerText="Enter";return;}
   if(!existing||existing.length===0){
     let avatar=`https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=333&color=fff`;
     const af=document.getElementById('avatarFile').files[0];
     if(af){try{avatar=await uploadFile("avatars",`${name}_av`,af);}catch(e){}}
-    const created=await dbPost("users",{username:name,password:pass,avatar,subscribers:[],following:[],keep_logged_in:keep});
+    // Only send columns the table definitely has
+    let created=null;
+    try{
+      const resp=await fetch(`${SUPA_URL}/rest/v1/users`,{method:"POST",headers:H,body:JSON.stringify({username:name,password:pass,avatar,subscribers:[],keep_logged_in:keep})});
+      const txt=await resp.text();
+      if(resp.ok){const j=JSON.parse(txt);created=Array.isArray(j)?j[0]:j;}
+      else{
+        // Try to show a readable error
+        let msg="Couldn't create account.";
+        try{const je=JSON.parse(txt);msg=je.message||je.hint||je.details||msg;}catch(pe){}
+        err.innerText=msg;btn.disabled=false;btn.innerText="Enter";return;
+      }
+    }catch(e){err.innerText="Network error. Try again.";btn.disabled=false;btn.innerText="Enter";return;}
     if(!created){err.innerText="Couldn't create account.";btn.disabled=false;btn.innerText="Enter";return;}
     currentUser=created;
   }else{if(existing[0].password!==pass){err.innerText="Wrong password.";btn.disabled=false;btn.innerText="Enter";return;}currentUser=existing[0];}
@@ -708,9 +760,45 @@ function updateNotifBadge(){if(!currentUser)return;const cnt=allPosts.filter(p=>
 function getTimeAgo(d){if(!d)return'';const s=Math.floor((Date.now()-new Date(d))/1000),m=Math.floor(s/60),h=Math.floor(m/60),dy=Math.floor(h/24);if(dy>0)return dy===1?'Yesterday':`${dy}d ago`;if(h>0)return`${h}h ago`;if(m>0)return`${m}m ago`;return'Just now';}
 
 // ---- REPORT ----
-window.openReport=function(postId){document.getElementById('reportPostId').value=postId;openModal('reportModal');};
-window.submitReport=async function(){const postId=document.getElementById('reportPostId').value,reason=document.getElementById('reportReason').value,detail=document.getElementById('reportDetail').value;await dbPost("reports",{id:`${me()}_${Date.now()}`,post_id:postId,reporter:me(),reason,detail});closeModal('reportModal');alert("Report sent. Thank you.");};
-async function loadReports(){const reports=await dbGet("reports","select=*&order=created_at.desc");const c=document.getElementById('reportsList');document.getElementById('noahReports').style.display='block';if(!reports.length){c.innerHTML=`<div style="color:var(--text3);font-size:13px;">No reports.</div>`;return;}c.innerHTML=reports.map(r=>`<div class="report-item"><div style="font-size:12px;color:var(--accent);font-weight:700;">${r.reason}</div><div style="font-size:12px;margin:4px 0;">Post: <span style="color:var(--blue);">${r.post_id}</span></div><div style="font-size:12px;">Reporter: <b>${r.reporter}</b></div>${r.detail?`<div style="font-size:11px;color:var(--text2);margin-top:4px;">${r.detail}</div>`:''}<div style="font-size:10px;color:var(--text3);margin-top:4px;">${new Date(r.created_at).toLocaleString()}</div></div>`).join('');}
+window.styleReportCheck=function(id){const lbl=document.getElementById(`rl-${id}`),chk=document.getElementById(`rc-${id}`);if(chk.checked){lbl.style.borderColor='var(--accent)';lbl.style.background='rgba(255,0,80,0.1)';}else{lbl.style.borderColor='var(--border)';lbl.style.background='var(--bg4)';}};
+window.openReport=function(postId){
+  document.getElementById('reportPostId').value=postId;
+  // reset checkboxes
+  ['spam','harassment','inappropriate','misinformation','violence','other'].forEach(id=>{
+    const chk=document.getElementById(`rc-${id}`);if(chk)chk.checked=false;
+    styleReportCheck(id);
+  });
+  document.getElementById('reportDetail').value='';
+  document.getElementById('reportErr').innerText='';
+  openModal('reportModal');
+};
+window.submitReport=async function(){
+  const postId=document.getElementById('reportPostId').value;
+  const reasons=['spam','harassment','inappropriate','misinformation','violence','other'].filter(id=>document.getElementById(`rc-${id}`)?.checked).join(', ');
+  const detail=document.getElementById('reportDetail').value.trim();
+  if(!reasons){document.getElementById('reportErr').innerText='Please select at least one reason.';return;}
+  document.getElementById('reportErr').innerText='';
+  await dbPost("reports",{id:`${me()}_${Date.now()}`,post_id:postId,reporter:me(),reason:reasons,detail:detail||null});
+  closeModal('reportModal');
+  alert("Report sent to ZXY. Thank you.");
+};
+async function loadReports(){
+  const reports=await dbGet("reports","select=*&order=created_at.desc");
+  const c=document.getElementById('reportsList');
+  const ownerPanel=document.getElementById('noahReports');
+  if(ownerPanel)ownerPanel.style.display='block';
+  if(!reports.length){c.innerHTML=`<div style="color:var(--text3);font-size:13px;padding:10px 0;">No reports yet. All clear! ✅</div>`;return;}
+  c.innerHTML=reports.map(r=>`
+    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);background:rgba(255,0,80,0.1);padding:3px 8px;border-radius:20px;border:1px solid rgba(255,0,80,0.3);">${r.reason}</div>
+        <div style="font-size:10px;color:var(--text3);">${new Date(r.created_at).toLocaleString()}</div>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">Post ID: <span style="color:var(--blue);font-family:monospace;">${r.post_id}</span></div>
+      <div style="font-size:12px;">Reported by: <strong style="color:var(--text);">@${r.reporter}</strong></div>
+      ${r.detail?`<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--bg4);border-radius:6px;border-left:2px solid var(--accent);">"${r.detail}"</div>`:''}
+    </div>`).join('');
+}
 
 // ---- UPLOAD ----
 window.openUpload=()=>openModal('uploadModal');
@@ -769,7 +857,7 @@ window.sendGif=async function(url){document.getElementById('gifPanel').style.dis
 window.renderCreator=async function(){const m=me(),myPosts=allPosts.filter(p=>p.uploader===m);const totalV=myPosts.reduce((a,p)=>a+(p.views||0),0),totalL=myPosts.reduce((a,p)=>a+(p.likes||[]).length,0);let subs=0;try{const rows=await dbGet("users",`username=eq.${encodeURIComponent(m)}&select=subscribers`);subs=(rows[0]?.subscribers||[]).length;}catch(e){}document.getElementById('totalViews').innerText=totalV;document.getElementById('totalLikes').innerText=totalL;document.getElementById('totalSubs').innerText=subs;document.getElementById('totalPosts').innerText=myPosts.length;const c=document.getElementById('creatorPosts');if(!myPosts.length){c.innerHTML=`<div class="empty">You haven't posted yet.</div>`;return;}c.innerHTML='';myPosts.forEach(post=>{const div=document.createElement('div');div.className='creator-post-item';div.innerHTML=`<div style="font-weight:700;font-size:14px;margin-bottom:4px;">${post.title}</div><div style="font-size:11px;color:var(--text3);">${post.type} · ${post.created_at?new Date(post.created_at).toLocaleDateString():''}</div><div class="creator-post-stats"><span class="creator-stat-chip">👁 ${post.views||0}</span><span class="creator-stat-chip">👍 ${(post.likes||[]).length}</span><span class="creator-stat-chip">👎 ${(post.dislikes||[]).length}</span><span class="creator-stat-chip">❤️ ${(post.hearts||[]).length}</span><span class="creator-stat-chip">💬 ${(post.comments||[]).length}</span></div><button class="creator-comments-btn" onclick="showCreatorComments('${post.id}')">View Comments</button>`;c.appendChild(div);});};
 window.showCreatorComments=function(postId){const post=allPosts.find(p=>p.id===postId);if(!post)return;document.getElementById('ccModalTitle').innerText=`Comments — ${post.title}`;const list=document.getElementById('ccModalList');const comments=post.comments||[];if(!comments.length){list.innerHTML=`<div style="color:var(--text3);">No comments yet.</div>`;}else list.innerHTML=comments.map(c=>`<div style="margin-bottom:10px;padding:8px;background:var(--bg4);border-radius:8px;"><span style="font-weight:700;color:var(--blue);">@${c.user}</span><br>${c.text}</div>`).join('');openModal('creatorCommentsModal');};
 
-window.renderProfile=async function(){if(!currentUser)return;const m=me();document.getElementById('profileAvatar').src=currentUser.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(m)}&background=333&color=fff`;document.getElementById('profileName').innerText=m;document.getElementById('keepLoginToggle').checked=!!currentUser.keep;try{const rows=await dbGet("users",`username=eq.${encodeURIComponent(m)}&select=subscribers`);document.getElementById('pSubs').innerText=(rows[0]?.subscribers||[]).length;}catch(e){}const myPosts=allPosts.filter(p=>p.uploader===m);document.getElementById('pLikes').innerText=myPosts.reduce((a,p)=>a+(p.likes||[]).length,0);document.getElementById('pPosts').innerText=myPosts.length;if(m==='noah')loadReports();};
+window.renderProfile=async function(){if(!currentUser)return;const m=me();document.getElementById('profileAvatar').src=currentUser.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(m)}&background=333&color=fff`;document.getElementById('profileName').innerText=m;document.getElementById('keepLoginToggle').checked=!!currentUser.keep;try{const rows=await dbGet("users",`username=eq.${encodeURIComponent(m)}&select=subscribers`);document.getElementById('pSubs').innerText=(rows[0]?.subscribers||[]).length;}catch(e){}const myPosts=allPosts.filter(p=>p.uploader===m);document.getElementById('pLikes').innerText=myPosts.reduce((a,p)=>a+(p.likes||[]).length,0);document.getElementById('pPosts').innerText=myPosts.length;if(isOwner())loadReports();};
 
 window.openModal=id=>document.getElementById(id).classList.add('open');
 window.closeModal=id=>document.getElementById(id).classList.remove('open');
