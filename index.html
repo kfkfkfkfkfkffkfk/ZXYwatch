@@ -472,18 +472,46 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
     <input id="postTitle" class="field" placeholder="Title">
     <textarea id="postDesc" class="field" rows="2" placeholder="Description..." style="resize:vertical;"></textarea>
 
-    <!-- DUAL MUSIC SECTION IN UPLOAD -->
-    <div style="background:var(--bg4);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border);">
-      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:6px;">🎵 Background Music <span style="font-size:10px;color:var(--text3);font-weight:400;">(optional)</span></div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-        <span style="font-size:11px;color:var(--text3);">⏸</span>
-        <input id="postMusicPaused" class="field" style="margin:0;font-size:13px;padding:9px 12px;" placeholder="Music when video is PAUSED (YouTube, Spotify...)">
+    <!-- DUAL MUSIC + MUTE SWITCH SECTION -->
+    <div style="background:var(--bg4);border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);">🎵 Background Music</div>
+        <div style="font-size:10px;color:var(--text3);">optional</div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <span style="font-size:11px;color:var(--green);">▶</span>
-        <input id="postMusicPlaying" class="field" style="margin:0;font-size:13px;padding:9px 12px;" placeholder="Music when video is PLAYING (YouTube, Spotify...)">
+
+      <!-- Paused music -->
+      <div style="margin-bottom:10px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:5px;display:flex;align-items:center;gap:5px;"><span style="font-size:14px;">⏸</span> Music when video is <strong style="color:var(--text2);">PAUSED</strong></div>
+        <input id="postMusicPaused" class="field" style="margin:0;font-size:13px;padding:9px 12px;" placeholder="YouTube, Spotify, SoundCloud link..." oninput="updateUploadPreview()">
       </div>
-      <div style="font-size:10px;color:var(--text3);margin-top:8px;">Enable the mute switch on a post to swap video audio for your chosen music tracks.</div>
+
+      <!-- Playing music -->
+      <div style="margin-bottom:14px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:5px;display:flex;align-items:center;gap:5px;"><span style="font-size:14px;color:var(--green);">▶</span> Music when video is <strong style="color:var(--text2);">PLAYING</strong></div>
+        <input id="postMusicPlaying" class="field" style="margin:0;font-size:13px;padding:9px 12px;" placeholder="YouTube, Spotify, SoundCloud link..." oninput="updateUploadPreview()">
+      </div>
+
+      <!-- Mute switch -->
+      <div style="background:var(--bg3);border-radius:8px;padding:10px 12px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--text);">Mute video audio</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">ON = only music plays &nbsp;·&nbsp; OFF = music + video audio together</div>
+        </div>
+        <label class="toggle" style="flex-shrink:0;margin-left:12px;"><input type="checkbox" id="postMuteVideo" onchange="updateUploadPreview()"><span class="toggle-slider"></span></label>
+      </div>
+
+      <!-- Live preview -->
+      <div id="uploadPreviewBox" style="display:none;background:var(--bg3);border-radius:8px;border:1px solid var(--border);overflow:hidden;">
+        <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border);">PREVIEW</div>
+        <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;">
+          <!-- Video preview -->
+          <div id="uploadVidPreview" style="display:none;background:#000;border-radius:6px;overflow:hidden;aspect-ratio:16/9;position:relative;">
+            <video id="uploadPreviewVid" style="width:100%;height:100%;object-fit:contain;" controls muted playsinline></video>
+          </div>
+          <!-- Music state display -->
+          <div id="uploadMusicPreviewInfo" style="font-size:12px;color:var(--text2);line-height:1.6;"></div>
+        </div>
+      </div>
     </div>
 
     <button id="postBtn" class="btn-primary" onclick="submitPost()">Post</button>
@@ -583,10 +611,6 @@ let currentUser=null,allPosts=[],allChats=[],currentChatId=null;
 let currentUploadType="video",currentChatType="dm",msgReactTargetId=null,chatPollInterval=null;
 let loginSignInOnly=false,userSearchTimer=null,myFollowing=[],readNotifIds=new Set();
 
-// Track per-post mute state and video play state
-const postMuteState={};   // postId -> boolean (muted = use music)
-const postVideoPlaying={}; // postId -> boolean
-
 async function dbGet(t,q=""){const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{headers:H});if(!r.ok){console.error(await r.text());return[];}return r.json();}
 async function dbPost(t,b){const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{method:"POST",headers:H,body:JSON.stringify(b)});if(!r.ok){console.error(await r.text());return null;}const j=await r.json();return Array.isArray(j)?j[0]:j;}
 async function dbPatch(t,q,b){const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"PATCH",headers:H,body:JSON.stringify(b)});if(!r.ok){console.error(await r.text());return null;}return r.json();}
@@ -673,78 +697,68 @@ window.renderFeed=function(){
   allPosts.forEach(p=>c.appendChild(buildPostCard(p)));
 };
 
-// ---- MUSIC EMBED BUILDER ----
+// ---- MUSIC EMBED HTML BUILDER (shared) ----
 function buildMusicEmbedHTML(url){
   if(!url) return null;
-  let m,tag='';
+  let m;
   m=url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  if(m) return {tag:'YT',html:`<iframe src="https://www.youtube.com/embed/${m[1]}?autoplay=0" height="80" allow="autoplay"></iframe>`};
+  if(m) return{tag:'YouTube',html:`<iframe src="https://www.youtube.com/embed/${m[1]}?autoplay=0" height="80" allow="autoplay" style="border:none;width:100%;display:block;"></iframe>`};
   m=url.match(/spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/);
-  if(m){const h=m[1]==='track'?80:152;return{tag:'Spotify',html:`<iframe src="https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0" height="${h}" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>`};}
-  if(url.includes('soundcloud.com')) return{tag:'SC',html:`<iframe src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff0050&auto_play=false&hide_related=true&show_comments=false" height="80"></iframe>`};
+  if(m){const h=m[1]==='track'?80:152;return{tag:'Spotify',html:`<iframe src="https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0" height="${h}" style="border:none;width:100%;display:block;" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>`};}
+  if(url.includes('soundcloud.com')) return{tag:'SoundCloud',html:`<iframe src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff0050&auto_play=false&hide_related=true&show_comments=false" height="80" style="border:none;width:100%;display:block;"></iframe>`};
   m=url.match(/music\.apple\.com\/([a-z]+)\/(album|song|playlist)\/[^/]+\/([0-9]+)/);
-  if(m) return{tag:'Apple',html:`<iframe src="https://embed.music.apple.com/${m[1]}/${m[2]}/${m[3]}" height="150" allow="autoplay *; encrypted-media *; fullscreen *"></iframe>`};
-  if(url.startsWith('http')) return{tag:'Link',html:`<div style="padding:8px;"><a href="${url}" target="_blank" style="color:var(--blue);font-size:12px;">Open music ↗</a></div>`};
+  if(m) return{tag:'Apple Music',html:`<iframe src="https://embed.music.apple.com/${m[1]}/${m[2]}/${m[3]}" height="150" style="border:none;width:100%;display:block;" allow="autoplay *; encrypted-media *; fullscreen *"></iframe>`};
+  if(url.startsWith('http')) return{tag:'Link',html:`<div style="padding:10px 12px;"><a href="${url}" target="_blank" style="color:var(--blue);font-size:12px;">Open music ↗</a></div>`};
   return null;
 }
 
-// ---- DUAL MUSIC BLOCK ----
-function buildDualMusicBlock(post){
+// ---- MUSIC ON FEED CARDS (read-only, creator chose settings at upload) ----
+function buildMusicBlock(post){
   const pausedUrl=post.music_paused_url||'';
   const playingUrl=post.music_playing_url||'';
-  if(!pausedUrl && !playingUrl) return '';
+  if(!pausedUrl&&!playingUrl) return '';
 
+  const muteVideo=!!post.music_mute_video;
   const pausedEmbed=pausedUrl?buildMusicEmbedHTML(pausedUrl):null;
   const playingEmbed=playingUrl?buildMusicEmbedHTML(playingUrl):null;
 
-  let pausedTrackHTML='',playingTrackHTML='';
+  const muteChip=muteVideo
+    ?`<span style="background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.3);color:#ff6b6b;font-size:10px;padding:2px 7px;border-radius:20px;">🔇 Video muted when music plays</span>`
+    :`<span style="background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.25);color:var(--green);font-size:10px;padding:2px 7px;border-radius:20px;">🎵 Music + video audio together</span>`;
 
+  let tracks='';
   if(pausedEmbed){
-    pausedTrackHTML=`
-      <div class="music-track" id="mtrack-paused-${post.id}">
-        <div class="music-track-head" onclick="toggleTrackEmbed('${post.id}','paused')">
+    tracks+=`
+      <div class="music-track" id="mtrack-p-${post.id}">
+        <div class="music-track-head" onclick="toggleTrackEmbed('${post.id}','p')">
           <div class="music-state-dot dot-paused"></div>
-          <span class="music-track-label paused-lbl">⏸ Paused</span>
-          <span class="music-track-url">${pausedUrl}</span>
-          <span class="music-expand-btn" id="mexp-paused-${post.id}">▾</span>
+          <span class="music-track-label paused-lbl">⏸ When paused</span>
+          <span class="music-track-url">${pausedEmbed.tag}</span>
+          <span class="music-expand-btn" id="mexp-p-${post.id}">▾</span>
         </div>
-        <div class="music-embed-panel" id="membed-paused-${post.id}">${pausedEmbed.html}</div>
+        <div class="music-embed-panel" id="membed-p-${post.id}">${pausedEmbed.html}</div>
       </div>`;
   }
-
   if(playingEmbed){
-    playingTrackHTML=`
-      <div class="music-track" id="mtrack-playing-${post.id}">
-        <div class="music-track-head" onclick="toggleTrackEmbed('${post.id}','playing')">
+    tracks+=`
+      <div class="music-track" id="mtrack-v-${post.id}">
+        <div class="music-track-head" onclick="toggleTrackEmbed('${post.id}','v')">
           <div class="music-state-dot dot-playing"></div>
-          <span class="music-track-label playing-lbl">▶ Playing</span>
-          <span class="music-track-url">${playingUrl}</span>
-          <span class="music-expand-btn" id="mexp-playing-${post.id}">▾</span>
+          <span class="music-track-label playing-lbl">▶ While playing</span>
+          <span class="music-track-url">${playingEmbed.tag}</span>
+          <span class="music-expand-btn" id="mexp-v-${post.id}">▾</span>
         </div>
-        <div class="music-embed-panel" id="membed-playing-${post.id}">${playingEmbed.html}</div>
+        <div class="music-embed-panel" id="membed-v-${post.id}">${playingEmbed.html}</div>
       </div>`;
   }
 
   return `
     <div class="dual-music-block" id="dualmusic-${post.id}">
       <div class="dual-music-header">
-        <span class="dual-music-title">🎵 Background Music</span>
-        <div class="mute-row">
-          <span class="mute-label">Use music</span>
-          <label class="mute-switch">
-            <input type="checkbox" id="mute-toggle-${post.id}" onchange="onMuteToggle('${post.id}',this.checked)">
-            <span class="mute-slider"></span>
-          </label>
-        </div>
+        <span class="dual-music-title">🎵 Music</span>
+        ${muteChip}
       </div>
-      <div class="music-tracks">
-        ${pausedTrackHTML}
-        ${playingTrackHTML}
-        <div id="now-playing-bar-${post.id}" class="now-playing-bar" style="display:none;">
-          <div class="now-playing-dot"></div>
-          <span id="now-playing-txt-${post.id}">Music active</span>
-        </div>
-      </div>
+      <div class="music-tracks">${tracks}</div>
     </div>`;
 }
 
@@ -753,47 +767,8 @@ window.toggleTrackEmbed=function(postId,state){
   const btn=document.getElementById(`mexp-${state}-${postId}`);
   if(!panel)return;
   const open=panel.classList.toggle('open');
-  if(btn)btn.style.transform=open?'rotate(180deg)':'';
+  if(btn)btn.style.transform=open?'rotate(180deg)':'rotate(0deg)';
 };
-
-window.onMuteToggle=function(postId,muted){
-  postMuteState[postId]=muted;
-  // Mute/unmute the video element
-  const vid=document.getElementById(`player-${postId}`);
-  if(vid) vid.muted=muted;
-  // Update the active track highlight and now-playing bar
-  updateMusicStateUI(postId);
-};
-
-function updateMusicStateUI(postId){
-  const post=allPosts.find(p=>p.id===postId);
-  if(!post) return;
-  const muted=!!postMuteState[postId];
-  const playing=!!postVideoPlaying[postId];
-  const bar=document.getElementById(`now-playing-bar-${postId}`);
-  const txt=document.getElementById(`now-playing-txt-${postId}`);
-  const pausedTrack=document.getElementById(`mtrack-paused-${postId}`);
-  const playingTrack=document.getElementById(`mtrack-playing-${postId}`);
-
-  // Reset track highlight
-  if(pausedTrack){pausedTrack.classList.remove('active-state','active-paused');}
-  if(playingTrack){playingTrack.classList.remove('active-state','active-paused');}
-  if(bar) bar.style.display='none';
-
-  if(!muted) return;
-
-  if(playing){
-    // Use playing music
-    if(playingTrack){playingTrack.classList.add('active-state');}
-    if(bar){bar.style.display='flex';}
-    if(txt){txt.innerText=post.music_playing_url?'Playing music active':'No playing music set';}
-  } else {
-    // Use paused music
-    if(pausedTrack){pausedTrack.classList.add('active-paused');}
-    if(bar){bar.style.display='flex';}
-    if(txt){txt.innerText=post.music_paused_url?'Paused music active':'No paused music set';}
-  }
-}
 
 function buildPostCard(post){
   const m=me(),isLiked=(post.likes||[]).includes(m),isDisliked=(post.dislikes||[]).includes(m),isHearted=(post.hearts||[]).includes(m);
@@ -807,12 +782,11 @@ function buildPostCard(post){
     contentHTML=`<div class="poll-box"><div class="poll-q">${post.title}</div>${opts}</div>`;
   }
   const isSelf=post.uploader===m;
-  // Build dual music block (new) — also support legacy music_url
-  const dualMusic=buildDualMusicBlock(post);
+  const musicHTML=buildMusicBlock(post);
   const legacyMusic=(post.music_url&&!post.music_paused_url&&!post.music_playing_url)?buildLegacyMusicEmbed(post.music_url,post.id):'';
 
   const div=document.createElement('div');div.className='video-card';
-  div.innerHTML=`${contentHTML}<div class="meta">${post.type!=='poll'?`<div class="post-title">${post.title}</div>`:''}${post.description?`<div class="post-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>`:''}${dualMusic}${legacyMusic}<div class="post-stats">${post.created_at?new Date(post.created_at).toLocaleDateString():''} · ${post.views||0} views</div><div class="uploader-row"><div class="uploader-info"><img src="${post.uploader_avatar||''}" class="uploader-pic" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><span class="uploader-name">${post.uploader||''}</span></div>${!isSelf?`<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}','${post.id}')">Subscribe</button>`:''}</div><div class="action-row"><div class="act ${isLiked?'liked':''}" onclick="toggleLike('${post.id}')">👍 <span id="lc-${post.id}">${(post.likes||[]).length}</span></div><div class="act ${isDisliked?'disliked':''}" onclick="toggleDislike('${post.id}')">👎 <span id="dc-${post.id}">${(post.dislikes||[]).length}</span></div><div class="act ${isHearted?'hearted':''}" onclick="toggleHeart('${post.id}')">❤️ <span id="hc-${post.id}">${(post.hearts||[]).length}</span></div><div class="act" onclick="toggleReactions('${post.id}')">😊</div><div class="act" onclick="toggleComments('${post.id}')">💬 <span id="cc-${post.id}">${comments.length}</span></div>${!isSelf?`<div class="act" onclick="openReport('${post.id}')">⚑</div>`:''}</div><div id="reactions-${post.id}" class="reactions-panel">${buildReactSummary(post.reactions||{},post.id)}</div><div id="comments-${post.id}" class="comments-area"><div class="comment-list" id="cl-${post.id}">${comments.map(c=>`<div class="comment-item"><span class="comment-user">${c.user}</span>${c.text}</div>`).join('')}</div><div class="comment-input-row"><input class="comment-input" id="ci-${post.id}" placeholder="Comment..."><button class="btn-ghost" style="color:var(--blue);font-weight:700;" onclick="postComment('${post.id}')">Post</button></div></div></div>`;
+  div.innerHTML=`${contentHTML}<div class="meta">${post.type!=='poll'?`<div class="post-title">${post.title}</div>`:''}${post.description?`<div class="post-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>`:''}${musicHTML}${legacyMusic}<div class="post-stats">${post.created_at?new Date(post.created_at).toLocaleDateString():''} · ${post.views||0} views</div><div class="uploader-row"><div class="uploader-info"><img src="${post.uploader_avatar||''}" class="uploader-pic" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><span class="uploader-name">${post.uploader||''}</span></div>${!isSelf?`<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}','${post.id}')">Subscribe</button>`:''}</div><div class="action-row"><div class="act ${isLiked?'liked':''}" onclick="toggleLike('${post.id}')">👍 <span id="lc-${post.id}">${(post.likes||[]).length}</span></div><div class="act ${isDisliked?'disliked':''}" onclick="toggleDislike('${post.id}')">👎 <span id="dc-${post.id}">${(post.dislikes||[]).length}</span></div><div class="act ${isHearted?'hearted':''}" onclick="toggleHeart('${post.id}')">❤️ <span id="hc-${post.id}">${(post.hearts||[]).length}</span></div><div class="act" onclick="toggleReactions('${post.id}')">😊</div><div class="act" onclick="toggleComments('${post.id}')">💬 <span id="cc-${post.id}">${comments.length}</span></div>${!isSelf?`<div class="act" onclick="openReport('${post.id}')">⚑</div>`:''}</div><div id="reactions-${post.id}" class="reactions-panel">${buildReactSummary(post.reactions||{},post.id)}</div><div id="comments-${post.id}" class="comments-area"><div class="comment-list" id="cl-${post.id}">${comments.map(c=>`<div class="comment-item"><span class="comment-user">${c.user}</span>${c.text}</div>`).join('')}</div><div class="comment-input-row"><input class="comment-input" id="ci-${post.id}" placeholder="Comment..."><button class="btn-ghost" style="color:var(--blue);font-weight:700;" onclick="postComment('${post.id}')">Post</button></div></div></div>`;
   if(!isSelf){dbGet("users",`username=eq.${encodeURIComponent(post.uploader)}&select=subscribers`).then(rows=>{const btn=document.getElementById(`sub-${post.id}`);if(btn&&rows&&rows[0]){const s=(rows[0].subscribers||[]).includes(m);btn.innerText=s?'Subscribed':'Subscribe';if(s)btn.classList.add('subbed');}});}
   return div;
 }
@@ -862,25 +836,22 @@ window.startVid=function(id){
   const url=typeof mu==='string'?mu:mu.url;
   const v=document.getElementById(`player-${id}`),t=document.getElementById(`thumb-${id}`);if(!v)return;
   if(!v.src)v.src=url;
-  v.muted=!!postMuteState[id];  // respect mute switch
+  v.muted=!!p.music_mute_video;  // creator's setting
   if(t)t.style.opacity='0';v.style.display='block';v.controls=true;v.play().catch(()=>{});
-  postVideoPlaying[id]=true;updateMusicStateUI(id);
   dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{views:(p.views||0)+1});p.views=(p.views||0)+1;
 };
 window.startVidDirect=function(id,url){
   const p=allPosts.find(p=>p.id===id);
   const v=document.getElementById(`player-${id}`),t=document.getElementById(`thumb-${id}`);if(!v)return;
   if(!v.src)v.src=url;
-  v.muted=!!postMuteState[id];
+  v.muted=!!(p&&p.music_mute_video);
   if(t)t.style.opacity='0';v.style.display='block';v.controls=true;v.play().catch(()=>{});
-  postVideoPlaying[id]=true;updateMusicStateUI(id);
   if(p){dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{views:(p.views||0)+1});p.views=(p.views||0)+1;}
 };
 window.stopVid=function(id){
   const v=document.getElementById(`player-${id}`),t=document.getElementById(`thumb-${id}`);if(!v)return;
   v.pause();v.currentTime=0;v.style.display='none';v.controls=false;
   if(t)t.style.opacity='1';
-  postVideoPlaying[id]=false;updateMusicStateUI(id);
 };
 
 async function toggleArr(postId,field,add){const p=allPosts.find(p=>p.id===postId);if(!p)return;const m=me();p[field]=p[field]||[];if(add){if(!p[field].includes(m))p[field].push(m);}else{p[field]=p[field].filter(n=>n!==m);}await dbPatch("posts",`id=eq.${encodeURIComponent(postId)}`,{[field]:p[field]});}
@@ -916,15 +887,86 @@ window.submitReport=async function(){const postId=document.getElementById('repor
 async function loadReports(){const reports=await dbGet("reports","select=*&order=created_at.desc");const c=document.getElementById('reportsList');const ownerPanel=document.getElementById('noahReports');if(ownerPanel)ownerPanel.style.display='block';if(!reports.length){c.innerHTML=`<div style="color:var(--text3);font-size:13px;padding:10px 0;">No reports yet. All clear! ✅</div>`;return;}c.innerHTML=reports.map(r=>`<div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border);"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><div style="font-size:11px;font-weight:700;color:var(--accent);background:rgba(255,0,80,0.1);padding:3px 8px;border-radius:20px;border:1px solid rgba(255,0,80,0.3);">${r.reason}</div><div style="font-size:10px;color:var(--text3);">${new Date(r.created_at).toLocaleString()}</div></div><div style="font-size:12px;color:var(--text2);margin-bottom:4px;">Post ID: <span style="color:var(--blue);font-family:monospace;">${r.post_id}</span></div><div style="font-size:12px;">Reported by: <strong style="color:var(--text);">@${r.reporter}</strong></div>${r.detail?`<div style="font-size:12px;color:var(--text2);margin-top:6px;padding:8px;background:var(--bg4);border-radius:6px;border-left:2px solid var(--accent);">"${r.detail}"</div>`:''}</div>`).join('');}
 
 // ---- UPLOAD ----
-window.openUpload=()=>openModal('uploadModal');
-window.setVideoSource=function(src){const fileBtn=document.getElementById('vsrc-file-btn');const linkBtn=document.getElementById('vsrc-link-btn');const fileArea=document.getElementById('vsrc-file-area');const linkArea=document.getElementById('vsrc-link-area');if(src==='file'){fileArea.style.display='block';linkArea.style.display='none';fileBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);background:rgba(255,0,80,0.12);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;';linkBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg4);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;';}else{fileArea.style.display='none';linkArea.style.display='block';linkBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);background:rgba(255,0,80,0.12);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;';fileBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg4);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;';}};
-window.setTab=function(type,btn){currentUploadType=type;document.querySelectorAll('#uploadModal .tab').forEach(b=>b.classList.remove('active'));document.querySelectorAll('#uploadModal .tab-sect').forEach(s=>s.classList.remove('active'));btn.classList.add('active');document.getElementById(`ts-${type}`).classList.add('active');};
+window.openUpload=function(){
+  // reset preview state when opening
+  const pv=document.getElementById('uploadPreviewVid');if(pv){pv.src='';pv.load();}
+  document.getElementById('uploadVidPreview').style.display='none';
+  document.getElementById('uploadPreviewBox').style.display='none';
+  document.getElementById('uploadMusicPreviewInfo').innerHTML='';
+  openModal('uploadModal');
+};
+
+window.setVideoSource=function(src){
+  const fileBtn=document.getElementById('vsrc-file-btn');const linkBtn=document.getElementById('vsrc-link-btn');
+  const fileArea=document.getElementById('vsrc-file-area');const linkArea=document.getElementById('vsrc-link-area');
+  if(src==='file'){
+    fileArea.style.display='block';linkArea.style.display='none';
+    fileBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);background:rgba(255,0,80,0.12);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;';
+    linkBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg4);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;';
+  }else{
+    fileArea.style.display='none';linkArea.style.display='block';
+    linkBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--accent);background:rgba(255,0,80,0.12);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;';
+    fileBtn.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg4);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;';
+  }
+};
+
+window.setTab=function(type,btn){
+  currentUploadType=type;
+  document.querySelectorAll('#uploadModal .tab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('#uploadModal .tab-sect').forEach(s=>s.classList.remove('active'));
+  btn.classList.add('active');document.getElementById(`ts-${type}`).classList.add('active');
+};
+
+// Called when vidFile changes — load preview
+document.addEventListener('DOMContentLoaded',()=>{
+  const vf=document.getElementById('vidFile');
+  if(vf) vf.addEventListener('change',function(){
+    const f=this.files[0];if(!f)return;
+    const pv=document.getElementById('uploadPreviewVid');
+    const pvWrap=document.getElementById('uploadVidPreview');
+    pv.src=URL.createObjectURL(f);
+    pvWrap.style.display='block';
+    updateUploadPreview();
+  });
+});
+
+window.updateUploadPreview=function(){
+  const pausedUrl=document.getElementById('postMusicPaused').value.trim();
+  const playingUrl=document.getElementById('postMusicPlaying').value.trim();
+  const muteVideo=document.getElementById('postMuteVideo').checked;
+  const pv=document.getElementById('uploadPreviewVid');
+  const box=document.getElementById('uploadPreviewBox');
+  const info=document.getElementById('uploadMusicPreviewInfo');
+
+  // Only show preview box if there's something to show
+  const hasVid=pv&&pv.src&&pv.src!==window.location.href;
+  const hasMusic=pausedUrl||playingUrl;
+  if(!hasVid&&!hasMusic){box.style.display='none';return;}
+  box.style.display='block';
+
+  // Apply mute to preview video
+  if(pv) pv.muted=muteVideo;
+
+  // Build info text
+  let html='';
+  if(muteVideo){
+    html+=`<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.3);padding:3px 9px;border-radius:20px;font-size:11px;color:#ff6b6b;margin-bottom:8px;">🔇 Video audio will be muted</div><br>`;
+  } else if(hasMusic){
+    html+=`<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);padding:3px 9px;border-radius:20px;font-size:11px;color:var(--green);margin-bottom:8px;">🎵 Music plays alongside video audio</div><br>`;
+  }
+  if(pausedUrl) html+=`<div style="margin-top:6px;font-size:12px;"><span style="color:var(--text3);">⏸ Paused track:</span> <span style="color:var(--blue);">${pausedUrl.length>40?pausedUrl.slice(0,40)+'…':pausedUrl}</span></div>`;
+  if(playingUrl) html+=`<div style="margin-top:4px;font-size:12px;"><span style="color:var(--text3);">▶ Playing track:</span> <span style="color:var(--green);">${playingUrl.length>40?playingUrl.slice(0,40)+'…':playingUrl}</span></div>`;
+  if(!pausedUrl&&!playingUrl) html+=`<div style="font-size:12px;color:var(--text3);">No music links added yet.</div>`;
+  info.innerHTML=html;
+};
+
 function genThumb(file){return new Promise(resolve=>{const v=document.createElement('video');v.src=URL.createObjectURL(file);v.currentTime=1;v.muted=true;v.onseeked=()=>{const c=document.createElement('canvas');c.width=320;c.height=Math.round(320/(v.videoWidth||16)*(v.videoHeight||9));c.getContext('2d').drawImage(v,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',0.6));};v.onerror=()=>resolve(null);});}
 
 window.submitPost=async function(){
   const title=document.getElementById('postTitle').value.trim(),desc=document.getElementById('postDesc').value.trim();
   const musicPaused=document.getElementById('postMusicPaused').value.trim();
   const musicPlaying=document.getElementById('postMusicPlaying').value.trim();
+  const muteVideo=document.getElementById('postMuteVideo').checked;
   if(!title)return alert("Add a title.");
   const btn=document.getElementById('postBtn'),statusEl=document.getElementById('uploadStatus'),pw=document.getElementById('progressWrap'),pb=document.getElementById('progressBar');
   btn.disabled=true;btn.innerText="Posting...";statusEl.style.display='block';
@@ -933,18 +975,31 @@ window.submitPost=async function(){
     if(currentUploadType==='video'){
       const videoSourceMode=document.getElementById('vsrc-link-area').style.display==='none'?'file':'link';
       if(videoSourceMode==='link'){const lnk=document.getElementById('vidLink').value.trim();if(!lnk){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Paste a video link.");}media_url=resolveVideoLink(lnk);if(!media_url){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Couldn't recognise that link.");}}
-      else{const f=document.getElementById('vidFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Select a video.");}if(f.size>50*1024*1024){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Video is too large! Max 50MB.");}statusEl.innerText="Generating preview...";thumbnail=await genThumb(f);statusEl.innerText="Uploading video...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
+      else{const f=document.getElementById('vidFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Select a video.");}if(f.size>50*1024*1024){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Video too large! Max 50MB.");}statusEl.innerText="Generating preview...";thumbnail=await genThumb(f);statusEl.innerText="Uploading video...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
     }
     else if(currentUploadType==='image'){const f=document.getElementById('imgFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';return alert("Select an image.");}statusEl.innerText="Uploading...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
     else if(currentUploadType==='poll'){const o1=document.getElementById('pollOpt1').value.trim(),o2=document.getElementById('pollOpt2').value.trim();if(!o1||!o2){btn.disabled=false;btn.innerText='Post';return alert("Need 2 options.");}poll={options:[o1,o2],votes:[0,0],voters:[]};}
     statusEl.innerText="Saving...";const m=me();
-    const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:m,uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,
+    const newPost={
+      id:pid,type:currentUploadType,title,description:desc,
+      uploader:m,uploader_avatar:currentUser.avatar,
+      thumbnail,media_url,poll,
       music_paused_url:musicPaused||null,
       music_playing_url:musicPlaying||null,
-      likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0};
+      music_mute_video:muteVideo,   // creator's choice: mute video audio when music plays
+      likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0
+    };
     await dbPost("posts",newPost);allPosts.unshift(newPost);closeModal('uploadModal');
+    // Reset form
     ['postTitle','postDesc','postMusicPaused','postMusicPlaying','vidFile','vidLink','imgFile','pollOpt1','pollOpt2'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});
-    btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';renderFeed();
+    try{document.getElementById('postMuteVideo').checked=false;}catch(e){}
+    // Reset preview
+    const pv=document.getElementById('uploadPreviewVid');if(pv){pv.src='';pv.load();}
+    document.getElementById('uploadVidPreview').style.display='none';
+    document.getElementById('uploadPreviewBox').style.display='none';
+    document.getElementById('uploadMusicPreviewInfo').innerHTML='';
+    btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';
+    renderFeed();
   }catch(err){alert("Failed: "+err.message);btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';}
 };
 
