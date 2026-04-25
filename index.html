@@ -799,11 +799,58 @@ window.showPage=function(name){
   if(name==='creator')renderCreator();if(name==='profile')renderProfile();if(name==='chat')renderChats();
 };
 
-// Posts are persisted to Supabase — load fresh on every init
-async function loadPosts(){
+// ---- LOCAL STORAGE POST PERSISTENCE ----
+// Posts are saved to localStorage so they survive reloads with zero server dependency.
+// Supabase is attempted as a secondary sync but never blocks the UI.
+
+const POSTS_KEY = 'zxy_posts_v2';
+
+function savePostsLocal(posts){
   try{
-    allPosts=await dbGet("posts","select=*&order=created_at.desc");
-  }catch(e){allPosts=[];console.error("Failed to load posts",e);}
+    // Store without thumbnail blobs to save space — keep all other fields
+    const slim = posts.map(p => {
+      const copy = {...p};
+      // Only strip data-URI thumbnails (huge). Keep regular URL thumbnails.
+      if(copy.thumbnail && copy.thumbnail.startsWith('data:')) copy.thumbnail = null;
+      return copy;
+    });
+    localStorage.setItem(POSTS_KEY, JSON.stringify(slim));
+  }catch(e){
+    // If localStorage is full, try storing without thumbnails entirely
+    try{
+      const slim = posts.map(p=>({...p,thumbnail:null}));
+      localStorage.setItem(POSTS_KEY, JSON.stringify(slim));
+    }catch(e2){console.warn('localStorage full, posts not cached locally');}
+  }
+}
+
+function loadPostsLocal(){
+  try{
+    const raw = localStorage.getItem(POSTS_KEY);
+    if(!raw) return [];
+    return JSON.parse(raw);
+  }catch(e){ return []; }
+}
+
+async function loadPosts(){
+  // 1. Load from localStorage immediately — instant, always works
+  const local = loadPostsLocal();
+  if(local.length) allPosts = local;
+
+  // 2. Try Supabase in the background — if it works, merge & update local cache
+  try{
+    const remote = await dbGet("posts","select=*&order=created_at.desc");
+    if(remote && remote.length){
+      allPosts = remote;
+      savePostsLocal(allPosts);
+    } else if(!remote || remote.length === 0){
+      // Remote returned empty but local has posts — keep local (Supabase might be blocked)
+      if(!allPosts.length) allPosts = local;
+    }
+  }catch(e){
+    // Supabase blocked or offline — local data already loaded above
+    console.warn('Supabase unavailable, using local posts:', e.message||e);
+  }
 }
 
 window.renderFeed=function(){
@@ -852,16 +899,16 @@ window.startVid=function(id){const p=allPosts.find(p=>p.id===id);if(!p||!p.media
 window.startVidDirect=function(id,url){const p=allPosts.find(p=>p.id===id);const v=document.getElementById(`player-${id}`),t=document.getElementById(`thumb-${id}`);if(!v)return;pauseActiveMusic();if(!v.src)v.src=url;if(t)t.style.opacity='0';v.style.display='block';v.controls=true;v.play().catch(()=>{});if(p){dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{views:(p.views||0)+1});p.views=(p.views||0)+1;}};
 window.stopVid=function(id){const v=document.getElementById(`player-${id}`),t=document.getElementById(`thumb-${id}`);if(!v)return;v.pause();v.currentTime=0;v.style.display='none';v.controls=false;if(t)t.style.opacity='1';};
 
-async function toggleArr(postId,field,add){const p=allPosts.find(p=>p.id===postId);if(!p)return;const m=me();p[field]=p[field]||[];if(add){if(!p[field].includes(m))p[field].push(m);}else{p[field]=p[field].filter(n=>n!==m);}await dbPatch("posts",`id=eq.${encodeURIComponent(postId)}`,{[field]:p[field]});}
+async function toggleArr(postId,field,add){const p=allPosts.find(p=>p.id===postId);if(!p)return;const m=me();p[field]=p[field]||[];if(add){if(!p[field].includes(m))p[field].push(m);}else{p[field]=p[field].filter(n=>n!==m);}savePostsLocal(allPosts);dbPatch("posts",`id=eq.${encodeURIComponent(postId)}`,{[field]:p[field]}).catch(()=>{});}
 window.toggleLike=async function(id){const p=allPosts.find(p=>p.id===id);if(!p)return;const m=me(),was=(p.likes||[]).includes(m);await toggleArr(id,'likes',!was);if(!was){p.dislikes=(p.dislikes||[]).filter(n=>n!==m);await dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{dislikes:p.dislikes});}document.getElementById(`lc-${id}`).innerText=p.likes.length;document.getElementById(`dc-${id}`).innerText=(p.dislikes||[]).length;};
 window.toggleDislike=async function(id){const p=allPosts.find(p=>p.id===id);if(!p)return;const m=me(),was=(p.dislikes||[]).includes(m);await toggleArr(id,'dislikes',!was);if(!was){p.likes=(p.likes||[]).filter(n=>n!==m);await dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{likes:p.likes});}document.getElementById(`dc-${id}`).innerText=p.dislikes.length;document.getElementById(`lc-${id}`).innerText=(p.likes||[]).length;};
 window.toggleHeart=async function(id){const p=allPosts.find(p=>p.id===id);if(!p)return;const m=me(),was=(p.hearts||[]).includes(m);await toggleArr(id,'hearts',!was);document.getElementById(`hc-${id}`).innerText=p.hearts.length;};
-window.reactPost=async function(postId,emoji){const p=allPosts.find(p=>p.id===postId);if(!p)return;if(!p.reactions)p.reactions={};const m=me();if(p.reactions[m]===emoji)delete p.reactions[m];else p.reactions[m]=emoji;await dbPatch("posts",`id=eq.${encodeURIComponent(postId)}`,{reactions:p.reactions});const panel=document.getElementById(`reactions-${postId}`);if(panel)panel.innerHTML=buildReactSummary(p.reactions,postId);};
+window.reactPost=async function(postId,emoji){const p=allPosts.find(p=>p.id===postId);if(!p)return;if(!p.reactions)p.reactions={};const m=me();if(p.reactions[m]===emoji)delete p.reactions[m];else p.reactions[m]=emoji;savePostsLocal(allPosts);dbPatch("posts",`id=eq.${encodeURIComponent(postId)}`,{reactions:p.reactions}).catch(()=>{});const panel=document.getElementById(`reactions-${postId}`);if(panel)panel.innerHTML=buildReactSummary(p.reactions,postId);};
 window.toggleReactions=id=>document.getElementById(`reactions-${id}`)?.classList.toggle('show');
 window.toggleComments=id=>document.getElementById(`comments-${id}`)?.classList.toggle('show');
-window.postComment=async function(id){const input=document.getElementById(`ci-${id}`);if(!input||!input.value.trim())return;const p=allPosts.find(p=>p.id===id);if(!p)return;const c={user:me(),text:input.value.trim()};p.comments=[...(p.comments||[]),c];await dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{comments:p.comments});const list=document.getElementById(`cl-${id}`);if(list)list.innerHTML+=`<div class="comment-item"><span class="comment-user">@${c.user}</span>${c.text}</div>`;document.getElementById(`cc-${id}`).innerText=p.comments.length;input.value='';};
+window.postComment=async function(id){const input=document.getElementById(`ci-${id}`);if(!input||!input.value.trim())return;const p=allPosts.find(p=>p.id===id);if(!p)return;const c={user:me(),text:input.value.trim()};p.comments=[...(p.comments||[]),c];savePostsLocal(allPosts);dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{comments:p.comments}).catch(()=>{});const list=document.getElementById(`cl-${id}`);if(list)list.innerHTML+=`<div class="comment-item"><span class="comment-user">@${c.user}</span>${c.text}</div>`;document.getElementById(`cc-${id}`).innerText=p.comments.length;input.value='';};
 window.toggleSub=async function(creator,postId){const rows=await dbGet("users",`username=eq.${encodeURIComponent(creator)}&select=subscribers`);if(!rows||!rows[0])return;const m=me(),subs=rows[0].subscribers||[],subbed=subs.includes(m),newSubs=subbed?subs.filter(n=>n!==m):[...subs,m];await dbPatch("users",`username=eq.${encodeURIComponent(creator)}`,{subscribers:newSubs});const btn=document.getElementById(`sub-${postId}`);if(btn){btn.innerText=subbed?'Subscribe':'Subscribed';subbed?btn.classList.remove('subbed'):btn.classList.add('subbed');}};
-window.votePoll=async function(id,idx){const p=allPosts.find(p=>p.id===id);if(!p||!p.poll)return;const m=me();if((p.poll.voters||[]).includes(m))return;p.poll.votes[idx]++;p.poll.voters=[...(p.poll.voters||[]),m];await dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{poll:p.poll});renderFeed();};
+window.votePoll=async function(id,idx){const p=allPosts.find(p=>p.id===id);if(!p||!p.poll)return;const m=me();if((p.poll.voters||[]).includes(m))return;p.poll.votes[idx]++;p.poll.voters=[...(p.poll.voters||[]),m];savePostsLocal(allPosts);dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{poll:p.poll}).catch(()=>{});renderFeed();};
 
 // ---- USER SEARCH ----
 window.onUserSearch=function(val){clearTimeout(userSearchTimer);document.getElementById('searchClearBtn').classList.toggle('show',val.length>0);if(!val.trim()){document.getElementById('userSearchResults').innerHTML=`<div class="search-placeholder"><div style="font-size:52px;opacity:0.15;">👥</div><div style="color:var(--text2);font-weight:700;">Find people to follow</div><div style="color:var(--text3);font-size:12px;">Follow them to get notified about new posts</div></div>`;return;}document.getElementById('userSearchResults').innerHTML=`<div style="padding:40px;text-align:center;"><div class="spinner"></div></div>`;userSearchTimer=setTimeout(()=>doUserSearch(val.trim()),320);};
@@ -909,10 +956,14 @@ window.submitPost=async function(){
     }else if(currentUploadType==='image'){const f=document.getElementById('imgFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';return alert("Select an image.");}statusEl.innerText="Uploading...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
     else if(currentUploadType==='poll'){const o1=document.getElementById('pollOpt1').value.trim(),o2=document.getElementById('pollOpt2').value.trim();if(!o1||!o2){btn.disabled=false;btn.innerText='Post';return alert("Need 2 options.");}poll={options:[o1,o2],votes:[0,0],voters:[]};}
     statusEl.innerText="Saving...";
-    const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0};
-    // Save to Supabase — this is the persistence
-    const saved=await dbPost("posts",newPost);
-    if(saved)allPosts.unshift({...newPost,...saved});else allPosts.unshift(newPost);
+    const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0,created_at:new Date().toISOString()};
+    // PRIMARY: Save to localStorage immediately — always works, survives reloads
+    allPosts.unshift(newPost);
+    savePostsLocal(allPosts);
+    // SECONDARY: Try Supabase in the background (best effort, never blocks)
+    dbPost("posts",newPost).then(saved=>{
+      if(saved){const idx=allPosts.findIndex(p=>p.id===pid);if(idx>=0)allPosts[idx]={...newPost,...saved};savePostsLocal(allPosts);}
+    }).catch(e=>console.warn('Supabase sync skipped (localStorage is the source of truth):',e.message||e));
     closeModal('uploadModal');
     ['postTitle','postDesc','postMusic','vidFile','vidLink','imgFile','pollOpt1','pollOpt2'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});
     btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';
@@ -943,7 +994,7 @@ window.renderCreator=async function(){const m=me(),myPosts=allPosts.filter(p=>p.
 
 let _pendingDeleteId=null;
 window.openDeleteConfirm=function(postId,title){_pendingDeleteId=postId;document.getElementById('deleteModalSubtitle').innerText=`"${title}" will be permanently removed. This cannot be undone.`;openModal('deleteModal');};
-window.confirmDelete=async function(){if(!_pendingDeleteId)return;const btn=document.getElementById('deleteConfirmBtn');btn.disabled=true;btn.innerText='Deleting...';try{const r=await fetch(`${SUPA_URL}/rest/v1/posts?id=eq.${encodeURIComponent(_pendingDeleteId)}`,{method:'DELETE',headers:H});if(r.ok||r.status===204){allPosts=allPosts.filter(p=>p.id!==_pendingDeleteId);closeModal('deleteModal');_pendingDeleteId=null;renderCreator();renderFeed();}else{const t=await r.text();let msg='Delete failed.';try{const j=JSON.parse(t);msg=j.message||j.hint||msg;}catch(e){}alert(msg);};}catch(e){alert('Network error: '+e.message);}btn.disabled=false;btn.innerText='Delete';};
+window.confirmDelete=async function(){if(!_pendingDeleteId)return;const btn=document.getElementById('deleteConfirmBtn');btn.disabled=true;btn.innerText='Deleting...';const idToDel=_pendingDeleteId;allPosts=allPosts.filter(p=>p.id!==idToDel);savePostsLocal(allPosts);closeModal('deleteModal');_pendingDeleteId=null;renderCreator();renderFeed();fetch(`${SUPA_URL}/rest/v1/posts?id=eq.${encodeURIComponent(idToDel)}`,{method:'DELETE',headers:H}).catch(()=>{});btn.disabled=false;btn.innerText='Delete';};
 window.showCreatorComments=function(postId){const post=allPosts.find(p=>p.id===postId);if(!post)return;document.getElementById('ccModalTitle').innerText=`Comments — ${post.title}`;const list=document.getElementById('ccModalList');const comments=post.comments||[];if(!comments.length){list.innerHTML=`<div style="color:var(--text3);padding:8px 0;">No comments yet.</div>`;}else list.innerHTML=comments.map(c=>`<div style="margin-bottom:10px;padding:8px;background:var(--bg4);border-radius:8px;"><span style="font-weight:800;color:var(--blue);">@${c.user}</span><br><span style="color:var(--text2);">${c.text}</span></div>`).join('');openModal('creatorCommentsModal');};
 
 window.renderProfile=async function(){if(!currentUser)return;const m=me();document.getElementById('profileAvatar').src=currentUser.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(m)}&background=333&color=fff`;document.getElementById('profileName').innerText='@'+m;document.getElementById('keepLoginToggle').checked=!!currentUser.keep;try{const rows=await dbGet("users",`username=eq.${encodeURIComponent(m)}&select=subscribers`);document.getElementById('pSubs').innerText=(rows[0]?.subscribers||[]).length;}catch(e){}const myPosts=allPosts.filter(p=>p.uploader===m);document.getElementById('pLikes').innerText=myPosts.reduce((a,p)=>a+(p.likes||[]).length,0);document.getElementById('pPosts').innerText=myPosts.length;if(isOwner())loadReports();};
