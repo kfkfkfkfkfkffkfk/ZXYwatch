@@ -199,6 +199,23 @@ body { background: var(--bg); color: var(--text); display: flex; justify-content
 .search-clear.show { display: flex; }
 .search-results { flex: 1; overflow-y: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .search-results::-webkit-scrollbar { display: none; }
+.search-filter-btn { flex-shrink:0; padding:6px 14px; border-radius:20px; border:1.5px solid var(--border); background:var(--bg3); color:var(--text2); font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; transition:all 0.15s; white-space:nowrap; }
+.search-filter-btn.active { background:var(--accent); color:white; border-color:var(--accent); }
+.search-section-label { padding:10px 14px 4px; font-size:10px; font-weight:900; color:var(--text3); text-transform:uppercase; letter-spacing:1px; }
+.search-user-card { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--border); animation:fadeUp 0.14s ease both; cursor:pointer; transition:background 0.1s; }
+.search-user-card:active { background:var(--bg3); }
+.search-user-av { width:50px; height:50px; border-radius:50%; object-fit:cover; flex-shrink:0; border:2px solid var(--border); }
+.search-user-av.followed { border-color:var(--accent); }
+.search-post-card { display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--border); animation:fadeUp 0.14s ease both; cursor:pointer; transition:background 0.1s; }
+.search-post-card:active { background:var(--bg3); }
+.search-post-thumb { width:72px; height:48px; border-radius:8px; object-fit:cover; flex-shrink:0; background:var(--bg4); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.search-post-thumb img { width:100%; height:100%; object-fit:cover; }
+.search-post-thumb .thumb-icon { font-size:22px; }
+.search-post-info { flex:1; min-width:0; }
+.search-post-title { font-size:13px; font-weight:700; line-height:1.3; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.search-post-meta { font-size:11px; color:var(--text3); display:flex; align-items:center; gap:5px; }
+.search-post-uploader-av { width:16px; height:16px; border-radius:50%; object-fit:cover; }
+.search-highlight { color:var(--accent); }
 .search-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 12px; color: var(--text3); font-size: 13px; text-align: center; }
 .user-card { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--border); animation: fadeUp 0.16s ease both; }
 @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
@@ -369,16 +386,28 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
   <div id="page-search" class="page">
     <div class="search-top">
       <div class="search-input-wrap">
-        <span class="search-icon-l">🔍</span>
-        <input id="userSearchInput" class="search-big-input" placeholder="Search users..." autocomplete="off" autocorrect="off" spellcheck="false" oninput="onUserSearch(this.value)">
-        <button class="search-clear" id="searchClearBtn" onclick="clearUserSearch()">✕</button>
+        <span class="search-icon-l">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+        </span>
+        <input id="userSearchInput" class="search-big-input" placeholder="Search people & posts..." autocomplete="off" autocorrect="off" spellcheck="false" oninput="onUnifiedSearch(this.value)">
+        <button class="search-clear" id="searchClearBtn" onclick="clearUnifiedSearch()">✕</button>
+      </div>
+      <!-- Filter tabs -->
+      <div id="searchFilterRow" style="display:none;flex-direction:row;gap:6px;margin-top:10px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;">
+        <button class="search-filter-btn active" id="sf-all" onclick="setSearchFilter('all',this)">All</button>
+        <button class="search-filter-btn" id="sf-people" onclick="setSearchFilter('people',this)">People</button>
+        <button class="search-filter-btn" id="sf-posts" onclick="setSearchFilter('posts',this)">Posts</button>
+        <button class="search-filter-btn" id="sf-videos" onclick="setSearchFilter('videos',this)">Videos</button>
+        <button class="search-filter-btn" id="sf-links" onclick="setSearchFilter('links',this)">Links</button>
       </div>
     </div>
     <div class="search-results" id="userSearchResults">
       <div class="search-placeholder">
-        <div style="font-size:52px;opacity:0.15;">👥</div>
-        <div style="color:var(--text2);font-weight:700;">Find people to follow</div>
-        <div style="color:var(--text3);font-size:12px;">Follow them to get notified about new posts</div>
+        <div style="font-size:52px;opacity:0.12;">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="7"/><path d="M17 17L22 22"/></svg>
+        </div>
+        <div style="color:var(--text2);font-weight:800;font-size:16px;">Search ZXYwatch</div>
+        <div style="color:var(--text3);font-size:12px;line-height:1.6;">Find people, videos, photos, links and polls</div>
       </div>
     </div>
   </div>
@@ -918,7 +947,7 @@ function buildPostCard(post){
     contentHTML=`<div class="poll-box"><div class="poll-q">${post.title}</div>${opts}</div>`;
   }
   const isSelf=post.uploader===m;
-  const div=document.createElement('div');div.className='video-card';
+  const div=document.createElement('div');div.className='video-card';div.id='post-'+post.id;
   div.innerHTML=`${contentHTML}<div class="meta">${post.type!=='poll'?`<div class="post-title">${post.title}</div>`:''}${post.description?`<div class="post-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>`:''}${post.music_url?buildMusicEmbed(post.music_url,post.id):''}<div class="post-stats">${post.created_at?new Date(post.created_at).toLocaleDateString():''} · ${post.views||0} views</div><div class="uploader-row"><div class="uploader-info"><img src="${post.uploader_avatar||''}" class="uploader-pic" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><span class="uploader-name">@${post.uploader||''}</span></div>${!isSelf?`<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}','${post.id}')">Subscribe</button>`:''}</div><div class="action-row"><div class="act ${isLiked?'liked':''}" onclick="toggleLike('${post.id}')">👍 <span id="lc-${post.id}">${(post.likes||[]).length}</span></div><div class="act ${isDisliked?'disliked':''}" onclick="toggleDislike('${post.id}')">👎 <span id="dc-${post.id}">${(post.dislikes||[]).length}</span></div><div class="act ${isHearted?'hearted':''}" onclick="toggleHeart('${post.id}')">❤️ <span id="hc-${post.id}">${(post.hearts||[]).length}</span></div><div class="act" onclick="toggleReactions('${post.id}')">😊</div><div class="act" onclick="toggleComments('${post.id}')">💬 <span id="cc-${post.id}">${comments.length}</span></div>${!isSelf?`<div class="act" onclick="openReport('${post.id}')">⚑</div>`:''}</div><div id="reactions-${post.id}" class="reactions-panel">${buildReactSummary(post.reactions||{},post.id)}</div><div id="comments-${post.id}" class="comments-area"><div class="comment-list" id="cl-${post.id}">${comments.map(c=>`<div class="comment-item"><span class="comment-user">@${c.user}</span>${c.text}</div>`).join('')}</div><div class="comment-input-row"><input class="comment-input" id="ci-${post.id}" placeholder="Comment..."><button class="btn-ghost" style="color:var(--blue);font-weight:800;" onclick="postComment('${post.id}')">Post</button></div></div></div>`;
   if(!isSelf){dbGet("users",`username=eq.${encodeURIComponent(post.uploader)}&select=subscribers`).then(rows=>{const btn=document.getElementById(`sub-${post.id}`);if(btn&&rows&&rows[0]){const s=(rows[0].subscribers||[]).includes(m);btn.innerText=s?'Subscribed':'Subscribe';if(s)btn.classList.add('subbed');}});}
   return div;
@@ -958,10 +987,220 @@ window.toggleSub=async function(creator,postId){const rows=await dbGet("users",`
 window.votePoll=async function(id,idx){const p=allPosts.find(p=>p.id===id);if(!p||!p.poll)return;const m=me();if((p.poll.voters||[]).includes(m))return;p.poll.votes[idx]++;p.poll.voters=[...(p.poll.voters||[]),m];savePostsLocal(allPosts);dbPatch("posts",`id=eq.${encodeURIComponent(id)}`,{poll:p.poll}).catch(()=>{});renderFeed();};
 
 // ---- USER SEARCH ----
-window.onUserSearch=function(val){clearTimeout(userSearchTimer);document.getElementById('searchClearBtn').classList.toggle('show',val.length>0);if(!val.trim()){document.getElementById('userSearchResults').innerHTML=`<div class="search-placeholder"><div style="font-size:52px;opacity:0.15;">👥</div><div style="color:var(--text2);font-weight:700;">Find people to follow</div><div style="color:var(--text3);font-size:12px;">Follow them to get notified about new posts</div></div>`;return;}document.getElementById('userSearchResults').innerHTML=`<div style="padding:40px;text-align:center;"><div class="spinner"></div></div>`;userSearchTimer=setTimeout(()=>doUserSearch(val.trim()),320);};
-window.clearUserSearch=function(){document.getElementById('userSearchInput').value='';document.getElementById('searchClearBtn').classList.remove('show');document.getElementById('userSearchResults').innerHTML=`<div class="search-placeholder"><div style="font-size:52px;opacity:0.15;">👥</div><div style="color:var(--text2);font-weight:700;">Find people to follow</div><div style="color:var(--text3);font-size:12px;">Follow them to get notified about new posts</div></div>`;};
-async function doUserSearch(q){const m=me();let users=await dbGet("users","select=username,avatar,subscribers,following&limit=80");users=users.filter(u=>u.username!==m&&u.username.toLowerCase().includes(q.toLowerCase()));const c=document.getElementById('userSearchResults');if(!users.length){c.innerHTML=`<div class="search-placeholder"><div style="font-size:36px;opacity:0.2;">🔎</div><div>No users found for "<strong style="color:var(--text)">${q}</strong>"</div></div>`;return;}c.innerHTML='';users.forEach((u,i)=>{const isFollowing=myFollowing.includes(u.username);const isSubbed=(u.subscribers||[]).includes(m);const postCount=allPosts.filter(p=>p.uploader===u.username).length;const subCount=(u.subscribers||[]).length;const div=document.createElement('div');div.className='user-card';div.style.animationDelay=(i*0.04)+'s';div.innerHTML=`<img class="user-av" src="${u.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(u.username)}&background=333&color=fff`}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(u.username)}&background=333&color=fff'"><div class="user-info"><div class="user-name">@${u.username}</div><div class="user-stats-txt">${subCount} subscribers · ${postCount} posts</div></div><div class="user-actions"><button id="fb-${u.username}" class="follow-btn ${isFollowing?'is-following':'do-follow'}" onclick="toggleFollow('${u.username}',this)">${isFollowing?'Following':'Follow'}</button><button id="sb-${u.username}" class="sub-sm ${isSubbed?'is-subbed':'do-sub'}" onclick="toggleSubSearch('${u.username}',this)">${isSubbed?'Subbed':'Sub'}</button></div>`;c.appendChild(div);});}
-window.toggleFollow=async function(username,btn){const m=me();const isFollowing=myFollowing.includes(username);if(isFollowing){myFollowing=myFollowing.filter(n=>n!==username);btn.className='follow-btn do-follow';btn.innerText='Follow';}else{myFollowing.push(username);btn.className='follow-btn is-following';btn.innerText='Following';}await dbPatch("users",`username=eq.${encodeURIComponent(m)}`,{following:myFollowing});currentUser.following=myFollowing;const store=currentUser.keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));updateNotifBadge();};
+// ─── UNIFIED SEARCH ───────────────────────────────────────────────────────
+let _searchFilter='all', _searchQuery='', _searchUsers=[], _searchTimer=null;
+
+function hl(text, q) {
+  if(!q||!text) return text||'';
+  const safe = q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return String(text).replace(new RegExp(`(${safe})`,'gi'),'<span class="search-highlight">$1</span>');
+}
+
+function fuzzyScore(str, q) {
+  str = (str||'').toLowerCase(); q = (q||'').toLowerCase();
+  if(str===q) return 100;
+  if(str.startsWith(q)) return 90;
+  if(str.includes(q)) return 70;
+  // char-by-char fuzzy
+  let si=0, score=0;
+  for(let qi=0;qi<q.length&&si<str.length;qi++){
+    while(si<str.length&&str[si]!==q[qi]) si++;
+    if(si<str.length){score+=10;si++;}
+  }
+  return score;
+}
+
+window.onUnifiedSearch = function(val) {
+  clearTimeout(_searchTimer);
+  _searchQuery = val.trim();
+  document.getElementById('searchClearBtn').classList.toggle('show', val.length>0);
+  document.getElementById('searchFilterRow').style.display = val.length>0 ? 'flex' : 'none';
+  if(!_searchQuery) { resetSearchPlaceholder(); return; }
+  document.getElementById('userSearchResults').innerHTML = '<div style="padding:40px;text-align:center;"><div class="spinner"></div></div>';
+  _searchTimer = setTimeout(() => runUnifiedSearch(_searchQuery), 280);
+};
+
+window.clearUnifiedSearch = function() {
+  document.getElementById('userSearchInput').value='';
+  document.getElementById('searchClearBtn').classList.remove('show');
+  document.getElementById('searchFilterRow').style.display='none';
+  _searchQuery=''; _searchUsers=[];
+  setSearchFilter('all', document.getElementById('sf-all'));
+  resetSearchPlaceholder();
+};
+
+window.setSearchFilter = function(filter, btn) {
+  _searchFilter = filter;
+  document.querySelectorAll('.search-filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(_searchQuery) renderSearchResults(_searchQuery, _searchUsers);
+};
+
+function resetSearchPlaceholder() {
+  document.getElementById('userSearchResults').innerHTML = `
+    <div class="search-placeholder">
+      <div style="font-size:52px;opacity:0.12;">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="7"/><path d="M17 17L22 22"/></svg>
+      </div>
+      <div style="color:var(--text2);font-weight:800;font-size:16px;">Search ZXYwatch</div>
+      <div style="color:var(--text3);font-size:12px;line-height:1.6;">Find people, videos, photos, links and polls</div>
+    </div>`;
+}
+
+async function runUnifiedSearch(q) {
+  // Load users from Supabase, fallback to extracting from local posts
+  let users = [];
+  try {
+    const remote = await dbGet("users","select=username,avatar,subscribers,following&limit=200");
+    if(remote && remote.length) users = remote;
+  } catch(e) {}
+  // Also pull any uploaders from local posts not in users list
+  const knownNames = new Set(users.map(u=>u.username));
+  allPosts.forEach(p=>{
+    if(p.uploader && !knownNames.has(p.uploader)){
+      users.push({username:p.uploader,avatar:p.uploader_avatar||'',subscribers:[],following:[]});
+      knownNames.add(p.uploader);
+    }
+  });
+  _searchUsers = users;
+  renderSearchResults(q, users);
+}
+
+function renderSearchResults(q, users) {
+  const m = me();
+  const c = document.getElementById('userSearchResults');
+  const filter = _searchFilter;
+
+  // Score and filter users
+  const matchedUsers = users
+    .filter(u => u.username !== m)
+    .map(u => ({ ...u, score: Math.max(fuzzyScore(u.username, q)) }))
+    .filter(u => u.score > 0)
+    .sort((a,b) => b.score - a.score)
+    .slice(0,12);
+
+  // Score and filter posts
+  const matchedPosts = allPosts
+    .map(p => {
+      const ts = Math.max(
+        fuzzyScore(p.title, q),
+        fuzzyScore(p.description, q),
+        fuzzyScore(p.uploader, q)
+      );
+      return { ...p, score: ts };
+    })
+    .filter(p => p.score > 0)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, 30);
+
+  const showPeople = filter==='all' || filter==='people';
+  const showPosts  = filter==='all' || filter==='posts' || filter==='videos' || filter==='links';
+
+  const filteredPosts = matchedPosts.filter(p => {
+    if(filter==='videos') return p.type==='video';
+    if(filter==='links') return p.type==='link';
+    if(filter==='posts') return true;
+    return true;
+  });
+
+  if(!matchedUsers.length && !filteredPosts.length) {
+    c.innerHTML = `<div class="search-placeholder">
+      <div style="font-size:36px;opacity:0.2;">🔎</div>
+      <div style="color:var(--text2);font-weight:700;">No results for "<span style="color:var(--text)">${q}</span>"</div>
+      <div style="color:var(--text3);font-size:12px;">Try a different search</div>
+    </div>`;
+    return;
+  }
+
+  c.innerHTML = '';
+
+  // ── PEOPLE SECTION ──
+  if(showPeople && matchedUsers.length) {
+    const label = document.createElement('div');
+    label.className = 'search-section-label';
+    label.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> People`;
+    c.appendChild(label);
+
+    matchedUsers.forEach((u, i) => {
+      const isFollowing = myFollowing.includes(u.username);
+      const isSubbed = (u.subscribers||[]).includes(m);
+      const postCount = allPosts.filter(p=>p.uploader===u.username).length;
+      const subCount = (u.subscribers||[]).length;
+      const avatarSrc = u.avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(u.username)}&background=222&color=fff`;
+
+      const div = document.createElement('div');
+      div.className = 'search-user-card';
+      div.style.animationDelay = (i*0.03)+'s';
+      div.innerHTML = `
+        <img class="search-user-av ${isFollowing?'followed':''}" 
+             src="${avatarSrc}" 
+             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(u.username)}&background=222&color=fff'">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:800;font-size:14px;letter-spacing:-0.2px;">${hl('@'+u.username, q)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">${subCount} subscribers · ${postCount} posts</div>
+          ${isFollowing?'<div style="font-size:10px;color:var(--accent);margin-top:2px;font-weight:700;">● Following</div>':''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+          <button id="sfb-${u.username}" class="follow-btn ${isFollowing?'is-following':'do-follow'}" onclick="event.stopPropagation();toggleFollow('${u.username}',this)">${isFollowing?'Following':'Follow'}</button>
+          <button id="ssb-${u.username}" class="sub-sm ${isSubbed?'is-subbed':'do-sub'}" onclick="event.stopPropagation();toggleSubSearch('${u.username}',this)">${isSubbed?'Subbed':'Sub'}</button>
+        </div>`;
+      c.appendChild(div);
+    });
+  }
+
+  // ── POSTS SECTION ──
+  if(showPosts && filteredPosts.length) {
+    const label = document.createElement('div');
+    label.className = 'search-section-label';
+    const icon = filter==='videos'?'🎬':filter==='links'?'🔗':'📋';
+    label.innerHTML = `${icon} ${filter==='videos'?'Videos':filter==='links'?'Links':'Posts'}`;
+    c.appendChild(label);
+
+    filteredPosts.forEach((post, i) => {
+      const div = document.createElement('div');
+      div.className = 'search-post-card';
+      div.style.animationDelay = (i*0.025)+'s';
+      div.onclick = () => { showPage('feed'); setTimeout(()=>{ const el=document.getElementById('post-'+post.id); if(el)el.scrollIntoView({behavior:'smooth',block:'center'}); },200); };
+
+      // Thumbnail
+      let thumbHTML = '';
+      if(post.type==='video'){
+        const thumbSrc = post.thumbnail || '';
+        thumbHTML = `<div class="search-post-thumb">${thumbSrc?`<img src="${thumbSrc}" onerror="this.style.display='none'">`:''}<span class="thumb-icon" style="${thumbSrc?'display:none':''}">🎬</span></div>`;
+      } else if(post.type==='image'){
+        thumbHTML = `<div class="search-post-thumb"><img src="${post.media_url||''}" onerror="this.style.display='none'"><span class="thumb-icon" style="${post.media_url?'display:none':''}">📸</span></div>`;
+      } else if(post.type==='link'){
+        const ldImg = post.link_data?.image||'';
+        thumbHTML = `<div class="search-post-thumb">${ldImg?`<img src="${ldImg}" onerror="this.style.display='none'">`:''}<span class="thumb-icon" style="${ldImg?'display:none':''}">🔗</span></div>`;
+      } else if(post.type==='poll'){
+        thumbHTML = `<div class="search-post-thumb"><span class="thumb-icon">📊</span></div>`;
+      }
+
+      // Uploader avatar
+      const uploaderPost = users.find(u=>u.username===post.uploader);
+      const uploaderAv = post.uploader_avatar || uploaderPost?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=222&color=fff`;
+
+      const typeTag = post.type==='video'?'Video':post.type==='image'?'Photo':post.type==='link'?'Link':post.type==='poll'?'Poll':'Post';
+
+      div.innerHTML = `
+        ${thumbHTML}
+        <div class="search-post-info">
+          <div class="search-post-title">${hl(post.title||'Untitled', q)}</div>
+          ${post.description?`<div style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${hl(post.description.slice(0,60), q)}</div>`:''}
+          <div class="search-post-meta">
+            <img class="search-post-uploader-av" src="${uploaderAv}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=222&color=fff'">
+            <span>@${post.uploader}</span>
+            <span>·</span>
+            <span style="background:var(--bg4);padding:1px 6px;border-radius:8px;font-size:10px;">${typeTag}</span>
+            <span>·</span>
+            <span>👁 ${post.views||0}</span>
+          </div>
+        </div>`;
+      c.appendChild(div);
+    });
+  }
+}
+window.toggleFollow=async function(username,btn){const m=me();const isFollowing=myFollowing.includes(username);if(isFollowing){myFollowing=myFollowing.filter(n=>n!==username);btn.className='follow-btn do-follow';btn.innerText='Follow';}else{myFollowing.push(username);btn.className='follow-btn is-following';btn.innerText='Following';}await dbPatch("users",`username=eq.${encodeURIComponent(m)}`,{following:myFollowing}).catch(()=>{});currentUser.following=myFollowing;const store=currentUser.keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));updateNotifBadge();};
 window.toggleSubSearch=async function(username,btn){const m=me();const rows=await dbGet("users",`username=eq.${encodeURIComponent(username)}&select=subscribers`);if(!rows||!rows[0])return;const subs=rows[0].subscribers||[],subbed=subs.includes(m),newSubs=subbed?subs.filter(n=>n!==m):[...subs,m];await dbPatch("users",`username=eq.${encodeURIComponent(username)}`,{subscribers:newSubs});btn.className=`sub-sm ${subbed?'do-sub':'is-subbed'}`;btn.innerText=subbed?'Sub':'Subbed';};
 
 // ---- NOTIFICATIONS ----
