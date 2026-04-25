@@ -302,6 +302,16 @@ body { background: var(--bg); color: var(--text); display: flex; justify-content
 .creator-post-item { background:var(--bg3);border-radius:12px;margin:0 12px 10px;padding:12px;border:1px solid var(--border); }
 .creator-post-stats { display:flex;gap:8px;margin-top:8px;flex-wrap:wrap; }
 .creator-stat-chip { background:var(--bg4);padding:3px 9px;border-radius:20px;font-size:11px;color:var(--text2);font-weight:600; }
+.link-card { display:block; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg3); text-decoration:none; color:inherit; margin:0; cursor:pointer; transition:opacity 0.15s; }
+.link-card:active { opacity:0.8; }
+.link-card-img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:var(--bg4); }
+.link-card-img-placeholder { width:100%; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; font-size:52px; background:linear-gradient(135deg,var(--bg3),var(--bg4)); }
+.link-card-body { padding:12px 14px; }
+.link-card-site { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.6px; font-weight:700; margin-bottom:3px; display:flex; align-items:center; gap:5px; }
+.link-card-favicon { width:14px; height:14px; border-radius:3px; object-fit:contain; }
+.link-card-title { font-size:14px; font-weight:800; line-height:1.3; margin-bottom:4px; letter-spacing:-0.2px; }
+.link-card-desc { font-size:12px; color:var(--text2); line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.link-card-url { font-size:11px; color:var(--accent); margin-top:6px; display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .creator-comments-btn { background:none;border:1px solid var(--border);color:var(--blue);padding:6px 12px;border-radius:16px;font-size:11px;cursor:pointer;margin-top:8px;font-family:inherit;font-weight:700; }
 .delete-post-btn { background:none;border:1px solid rgba(255,0,80,0.3);color:var(--accent);padding:6px 10px;border-radius:16px;font-size:11px;cursor:pointer;margin-top:8px;margin-left:6px;font-family:inherit;font-weight:700;display:inline-flex;align-items:center;gap:5px;transition:background 0.15s; }
 .delete-post-btn:hover,.delete-post-btn:active { background:rgba(255,0,80,0.12); }
@@ -580,6 +590,7 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
       <button class="tab active" onclick="setTab('video',this)">Video</button>
       <button class="tab" onclick="setTab('image',this)">Photo</button>
       <button class="tab" onclick="setTab('poll',this)">Poll</button>
+      <button class="tab" onclick="setTab('link',this)">Link</button>
     </div>
     <div id="ts-video" class="tab-sect active">
       <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -599,6 +610,25 @@ input:checked + .toggle-slider:before { transform:translateX(18px); }
     <div id="ts-poll" class="tab-sect">
       <input id="pollOpt1" class="field" placeholder="Option 1">
       <input id="pollOpt2" class="field" placeholder="Option 2">
+    </div>
+    <div id="ts-link" class="tab-sect">
+      <div style="position:relative;">
+        <input id="linkUrl" class="field" placeholder="Paste any website URL..." oninput="onLinkInput(this.value)" style="padding-right:80px;">
+        <button onclick="fetchLinkPreview()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:var(--accent);color:white;border:none;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;">Preview</button>
+      </div>
+      <div id="linkPreviewBox" style="display:none;margin-top:10px;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--bg4);">
+        <div id="lpImgWrap" style="width:100%;aspect-ratio:16/9;background:var(--bg3);overflow:hidden;position:relative;">
+          <img id="lpImg" src="" style="width:100%;height:100%;object-fit:cover;display:none;">
+          <div id="lpImgFallback" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:40px;">🌐</div>
+        </div>
+        <div style="padding:12px;">
+          <div id="lpSitename" style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:4px;"></div>
+          <div id="lpTitle" style="font-size:14px;font-weight:700;margin-bottom:4px;line-height:1.3;"></div>
+          <div id="lpDesc" style="font-size:12px;color:var(--text2);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"></div>
+        </div>
+      </div>
+      <div id="lpStatus" style="font-size:11px;color:var(--text3);margin-top:6px;text-align:center;"></div>
+      <p style="font-size:11px;color:var(--text3);margin-top:6px;">Share any webpage — the preview loads automatically.</p>
     </div>
     <input id="postTitle" class="field" placeholder="Title">
     <textarea id="postDesc" class="field" rows="2" placeholder="Description..." style="resize:vertical;"></textarea>
@@ -865,6 +895,23 @@ function buildPostCard(post){
   let contentHTML='';
   if(post.type==='video'){contentHTML=buildVideoEmbed(post);}
   else if(post.type==='image'){contentHTML=`<img class="image-post" src="${post.media_url||''}">`;}
+  else if(post.type==='link'&&post.link_data){
+    const ld=post.link_data;
+    const faviconUrl=`https://www.google.com/s2/favicons?domain=${encodeURIComponent(ld.url||'')}&sz=32`;
+    const hostname=ld.url?new URL(ld.url).hostname.replace('www.',''):'';
+    contentHTML=`<a class="link-card" href="${ld.url||'#'}" target="_blank" rel="noopener noreferrer">
+      ${ld.image?`<img class="link-card-img" src="${ld.image}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="link-card-img-placeholder" style="display:none;">🌐</div>`:`<div class="link-card-img-placeholder">🌐</div>`}
+      <div class="link-card-body">
+        <div class="link-card-site"><img class="link-card-favicon" src="${faviconUrl}" onerror="this.style.display='none'">${ld.sitename||hostname}</div>
+        <div class="link-card-title">${ld.title||post.title||'Link'}</div>
+        ${ld.description?`<div class="link-card-desc">${ld.description}</div>`:''}
+        <div class="link-card-url">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          ${hostname}
+        </div>
+      </div>
+    </a>`;
+  }
   else if(post.type==='poll'&&poll){
     const total=(poll.votes||[0,0]).reduce((a,b)=>a+b,0),voted=(poll.voters||[]).includes(m);
     const opts=(poll.options||[]).map((o,i)=>{const pct=total?Math.round((poll.votes[i]/total)*100):0;return`<div class="poll-opt" onclick="votePoll('${post.id}',${i})"><div class="poll-fill" style="width:${voted?pct:0}%"></div><div class="poll-label"><span>${o}</span>${voted?`<span>${pct}%</span>`:''}</div></div>`;}).join('');
@@ -918,7 +965,7 @@ window.toggleFollow=async function(username,btn){const m=me();const isFollowing=
 window.toggleSubSearch=async function(username,btn){const m=me();const rows=await dbGet("users",`username=eq.${encodeURIComponent(username)}&select=subscribers`);if(!rows||!rows[0])return;const subs=rows[0].subscribers||[],subbed=subs.includes(m),newSubs=subbed?subs.filter(n=>n!==m):[...subs,m];await dbPatch("users",`username=eq.${encodeURIComponent(username)}`,{subscribers:newSubs});btn.className=`sub-sm ${subbed?'do-sub':'is-subbed'}`;btn.innerText=subbed?'Sub':'Subbed';};
 
 // ---- NOTIFICATIONS ----
-async function loadNotifs(){if(!currentUser)return;const c=document.getElementById('notifList');c.innerHTML=`<div style="padding:40px;text-align:center;"><div class="spinner"></div></div>`;if(!myFollowing.length){c.innerHTML=`<div class="notif-empty"><div style="font-size:48px;opacity:0.15;">🔔</div><div style="color:var(--text2);font-weight:700;">No notifications yet</div><div style="color:var(--text3);font-size:12px;margin-top:4px;">Follow people in Search to see their posts here</div></div>`;return;}const followedPosts=allPosts.filter(p=>myFollowing.includes(p.uploader)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));if(!followedPosts.length){c.innerHTML=`<div class="notif-empty"><div style="font-size:48px;opacity:0.15;">📭</div><div style="color:var(--text2);font-weight:700;">Nothing new yet</div><div style="color:var(--text3);font-size:12px;margin-top:4px;">People you follow haven't posted anything</div></div>`;return;}c.innerHTML='';followedPosts.forEach(post=>{const unread=!readNotifIds.has(post.id);const typeEmoji=post.type==='video'?'🎬':post.type==='image'?'📸':'📊';const div=document.createElement('div');div.className=`notif-item ${unread?'unread':''}`;div.onclick=()=>{markNotifRead(post.id);showPage('feed');};div.innerHTML=`<img class="notif-av" src="${post.uploader_avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff`}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><div class="notif-body"><div class="notif-text"><strong>@${post.uploader}</strong> posted a new ${post.type}: <span style="color:var(--text2);">${post.title||'Untitled'}</span></div><div class="notif-time">${getTimeAgo(post.created_at)}</div></div><div class="notif-type">${typeEmoji}</div>`;c.appendChild(div);});followedPosts.forEach(p=>readNotifIds.add(p.id));saveReadNotifs();updateNotifBadge();}
+async function loadNotifs(){if(!currentUser)return;const c=document.getElementById('notifList');c.innerHTML=`<div style="padding:40px;text-align:center;"><div class="spinner"></div></div>`;if(!myFollowing.length){c.innerHTML=`<div class="notif-empty"><div style="font-size:48px;opacity:0.15;">🔔</div><div style="color:var(--text2);font-weight:700;">No notifications yet</div><div style="color:var(--text3);font-size:12px;margin-top:4px;">Follow people in Search to see their posts here</div></div>`;return;}const followedPosts=allPosts.filter(p=>myFollowing.includes(p.uploader)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));if(!followedPosts.length){c.innerHTML=`<div class="notif-empty"><div style="font-size:48px;opacity:0.15;">📭</div><div style="color:var(--text2);font-weight:700;">Nothing new yet</div><div style="color:var(--text3);font-size:12px;margin-top:4px;">People you follow haven't posted anything</div></div>`;return;}c.innerHTML='';followedPosts.forEach(post=>{const unread=!readNotifIds.has(post.id);const typeEmoji=post.type==='video'?'🎬':post.type==='image'?'📸':post.type==='link'?'🔗':'📊';const div=document.createElement('div');div.className=`notif-item ${unread?'unread':''}`;div.onclick=()=>{markNotifRead(post.id);showPage('feed');};div.innerHTML=`<img class="notif-av" src="${post.uploader_avatar||`https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff`}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><div class="notif-body"><div class="notif-text"><strong>@${post.uploader}</strong> posted a new ${post.type}: <span style="color:var(--text2);">${post.title||'Untitled'}</span></div><div class="notif-time">${getTimeAgo(post.created_at)}</div></div><div class="notif-type">${typeEmoji}</div>`;c.appendChild(div);});followedPosts.forEach(p=>readNotifIds.add(p.id));saveReadNotifs();updateNotifBadge();}
 function markNotifRead(id){readNotifIds.add(id);saveReadNotifs();updateNotifBadge();}
 window.markAllRead=function(){allPosts.filter(p=>myFollowing.includes(p.uploader)).forEach(p=>readNotifIds.add(p.id));saveReadNotifs();updateNotifBadge();loadNotifs();};
 function saveReadNotifs(){try{localStorage.setItem(`zxy_read_${me()}`,JSON.stringify([...readNotifIds]));}catch(e){}}
@@ -955,8 +1002,37 @@ window.submitPost=async function(){
       else{const f=document.getElementById('vidFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Select a video.");}if(f.size>50*1024*1024){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Video too large! Max 50MB.");}statusEl.innerText="Generating preview...";thumbnail=await genThumb(f);statusEl.innerText="Uploading video...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
     }else if(currentUploadType==='image'){const f=document.getElementById('imgFile').files[0];if(!f){btn.disabled=false;btn.innerText='Post';return alert("Select an image.");}statusEl.innerText="Uploading...";pw.style.display='block';media_url=await uploadFile("media",pid,f,p=>{pb.style.width=p+'%';});}
     else if(currentUploadType==='poll'){const o1=document.getElementById('pollOpt1').value.trim(),o2=document.getElementById('pollOpt2').value.trim();if(!o1||!o2){btn.disabled=false;btn.innerText='Post';return alert("Need 2 options.");}poll={options:[o1,o2],votes:[0,0],voters:[]};}
+    else if(currentUploadType==='link'){
+      const linkRaw=document.getElementById('linkUrl').value.trim();
+      if(!linkRaw){btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';return alert("Paste a URL first.");}
+      let linkFull=linkRaw;
+      if(!/^https?:\/\//i.test(linkFull))linkFull='https://'+linkFull;
+      statusEl.innerText="Fetching link preview...";
+      // Use cached preview data if available
+      const cached=window._linkPreviewCache;
+      if(cached&&cached.url&&(cached.url===linkFull||cached.url===linkRaw)){
+        media_url=linkFull;
+        thumbnail=null; // link type doesn't need a stored thumb
+        // store link_data in media_url field as object
+        media_url={type:'link_data',...cached};
+      } else {
+        // Fetch fresh
+        try{
+          const ld=await doFetchLinkPreview(linkFull);
+          media_url={type:'link_data',...ld};
+        }catch(e){
+          // fallback minimal
+          media_url={type:'link_data',url:linkFull,title:title,description:desc,image:null,sitename:''};
+        }
+      }
+    }
     statusEl.innerText="Saving...";
-    const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0,created_at:new Date().toISOString()};
+    let _link_data=null;
+    if(currentUploadType==='link'&&media_url&&media_url.type==='link_data'){
+      _link_data={...media_url};delete _link_data.type;
+      media_url=_link_data.url||null;
+    }
+    const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,link_data:_link_data,music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0,created_at:new Date().toISOString()};
     // PRIMARY: Save to localStorage immediately — always works, survives reloads
     allPosts.unshift(newPost);
     savePostsLocal(allPosts);
@@ -965,7 +1041,7 @@ window.submitPost=async function(){
       if(saved){const idx=allPosts.findIndex(p=>p.id===pid);if(idx>=0)allPosts[idx]={...newPost,...saved};savePostsLocal(allPosts);}
     }).catch(e=>console.warn('Supabase sync skipped (localStorage is the source of truth):',e.message||e));
     closeModal('uploadModal');
-    ['postTitle','postDesc','postMusic','vidFile','vidLink','imgFile','pollOpt1','pollOpt2'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});
+    ['postTitle','postDesc','postMusic','vidFile','vidLink','imgFile','pollOpt1','pollOpt2','linkUrl'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});document.getElementById('linkPreviewBox').style.display='none';document.getElementById('lpStatus').innerText='';window._linkPreviewCache=null;
     btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';
     renderFeed();
   }catch(err){alert("Failed: "+err.message);btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';}
@@ -1002,6 +1078,74 @@ window.renderProfile=async function(){if(!currentUser)return;const m=me();docume
 window.openModal=id=>document.getElementById(id).classList.add('open');
 window.closeModal=id=>document.getElementById(id).classList.remove('open');
 document.addEventListener('click',e=>{if(e.target.classList.contains('modal'))closeModal(e.target.id);});
+
+// ---- LINK PREVIEW ----
+window._linkPreviewCache=null;
+let _lpDebounce=null;
+
+window.onLinkInput=function(val){
+  clearTimeout(_lpDebounce);
+  if(!val.trim()){document.getElementById('linkPreviewBox').style.display='none';document.getElementById('lpStatus').innerText='';return;}
+  _lpDebounce=setTimeout(()=>fetchLinkPreview(),700);
+};
+
+window.fetchLinkPreview=async function(){
+  let url=document.getElementById('linkUrl').value.trim();
+  if(!url)return;
+  if(!/^https?:\/\//i.test(url))url='https://'+url;
+  const status=document.getElementById('lpStatus');
+  const box=document.getElementById('linkPreviewBox');
+  status.innerText='Fetching preview...';
+  box.style.display='none';
+  try{
+    const data=await doFetchLinkPreview(url);
+    window._linkPreviewCache=data;
+    renderLinkPreviewBox(data);
+    box.style.display='block';
+    status.innerText='';
+  }catch(e){
+    status.innerText='Could not load preview. The URL will still be shared.';
+    window._linkPreviewCache={url,title:'',description:'',image:null,sitename:''};
+    // show minimal fallback box
+    document.getElementById('lpTitle').innerText=url;
+    document.getElementById('lpDesc').innerText='';
+    document.getElementById('lpSitename').innerText=new URL(url).hostname.replace('www.','');
+    document.getElementById('lpImg').style.display='none';
+    document.getElementById('lpImgFallback').style.display='flex';
+    box.style.display='block';
+  }
+};
+
+async function doFetchLinkPreview(url){
+  // Use multiple free Open Graph / metadata APIs as fallbacks
+  const apis=[
+    // 1. LinkPreview.net (free tier, no key needed for basic)
+    ()=>fetch(`https://api.linkpreview.net/?key=6c2f2e4e2b2a2b2a2b2a2b2a2b2a2b2a&q=${encodeURIComponent(url)}`).then(r=>r.json()).then(d=>({url,title:d.title||'',description:d.description||'',image:d.image||null,sitename:d.sitename||new URL(url).hostname.replace('www.','')})),
+    // 2. Microlink (generous free tier)
+    ()=>fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`).then(r=>r.json()).then(d=>{
+      if(d.status!=='success')throw new Error('microlink fail');
+      const m=d.data;
+      return{url,title:m.title||'',description:m.description||'',image:m.image?.url||m.screenshot?.url||null,sitename:m.publisher||new URL(url).hostname.replace('www.','')};
+    }),
+    // 3. Minimal fallback — just use favicon + URL as preview
+    ()=>Promise.resolve({url,title:new URL(url).hostname.replace('www.',''),description:url,image:null,sitename:new URL(url).hostname.replace('www.','')})
+  ];
+  for(const api of apis){
+    try{const result=await api();if(result&&result.url)return result;}catch(e){}
+  }
+  throw new Error('All preview APIs failed');
+}
+
+function renderLinkPreviewBox(data){
+  const img=document.getElementById('lpImg');
+  const fallback=document.getElementById('lpImgFallback');
+  if(data.image){img.src=data.image;img.style.display='block';fallback.style.display='none';img.onerror=()=>{img.style.display='none';fallback.style.display='flex';};}
+  else{img.style.display='none';fallback.style.display='flex';}
+  document.getElementById('lpTitle').innerText=data.title||data.url||'';
+  document.getElementById('lpDesc').innerText=data.description||'';
+  const hostname=data.url?new URL(data.url).hostname.replace('www.',''):'';
+  document.getElementById('lpSitename').innerText=data.sitename||hostname;
+}
 
 init();
 </script>
