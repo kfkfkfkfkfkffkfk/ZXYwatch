@@ -501,8 +501,9 @@ input:checked+.toggle-slider:before{transform:translateX(18px);}
     </label>
     <div id="loginModeLabel" style="font-size:13px;color:var(--text2);margin-bottom:12px;font-weight:500;">Create a new account</div>
     <form onsubmit="event.preventDefault();attemptLogin();">
-      <input id="loginUser" class="field" placeholder="Username" required autocomplete="off">
-      <input id="loginPass" class="field" type="password" placeholder="Password" required>
+      <input id="loginUser" class="field" placeholder="Username (letters, numbers, _)" required autocomplete="off" autocapitalize="none" spellcheck="false">
+      <div id="loginUsernameHint" style="font-size:11px;color:var(--text3);margin:-6px 0 8px;padding:0 2px;">Spaces are replaced with _. Min 2 characters.</div>
+      <input id="loginPass" class="field" type="password" placeholder="Password (min 3 characters)" required autocomplete="new-password">
       <div class="toggle-row" style="padding:8px 0;border:none;">
         <span style="font-size:13px;color:var(--text2);">Keep me logged in</span>
         <label class="toggle"><input type="checkbox" id="loginKeepToggle"><span class="toggle-slider"></span></label>
@@ -794,31 +795,102 @@ window.previewAvatar=function(i){if(i.files[0]){const r=new FileReader();r.onloa
 window.toggleLoginMode=function(){loginSignInOnly=!loginSignInOnly;document.getElementById('loginModeLabel').innerText=loginSignInOnly?'Sign in to your account':'Create a new account';document.getElementById('loginToggleText').innerText=loginSignInOnly?"Don't have an account?":"Already have an account?";document.getElementById('loginToggleBtn').innerText=loginSignInOnly?"Create account":"Sign in";document.getElementById('avatarLabel').style.display=loginSignInOnly?'none':'inline-block';document.getElementById('loginErr').innerText='';};
 
 window.attemptLogin=async function(){
-  const name=document.getElementById('loginUser').value.trim().toLowerCase().replace(/\s+/g,'_');
+  const raw=document.getElementById('loginUser').value.trim();
+  const name=raw.toLowerCase().replace(/[^a-z0-9_]/g,'_').replace(/__+/g,'_').replace(/^_|_$/g,'');
   const pass=document.getElementById('loginPass').value;
   const keep=document.getElementById('loginKeepToggle').checked;
   const err=document.getElementById('loginErr'),btn=document.getElementById('loginBtn');
-  err.innerText='';if(!name||!pass)return;btn.disabled=true;btn.innerText='...';
+  err.innerText='';
+  if(!name){err.innerText="Enter a username.";return;}
+  if(name.length<2){err.innerText="Username must be at least 2 characters.";return;}
+  if(!pass){err.innerText="Enter a password.";return;}
+  if(pass.length<3){err.innerText="Password must be at least 3 characters.";return;}
+  btn.disabled=true;btn.innerText='...';
+
+  // Owner shortcut
   if(name==='zxy'&&pass==='happymeal'){
     currentUser={username:'zxy',name:'zxy',avatar:'https://ui-avatars.com/api/?name=ZXY&background=ff0050&color=fff',subscribers:[],following:[],isOwner:true,keep};
     const store=keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));
     document.getElementById('loginScreen').classList.add('hidden');btn.disabled=false;btn.innerText="Enter";await finishInit();return;
   }
-  let existing=await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=*`);
-  if(loginSignInOnly&&(!existing||!existing.length)){err.innerText="No account found.";btn.disabled=false;btn.innerText="Enter";return;}
-  if(!existing||!existing.length){
-    let avatar=`https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=333&color=fff`;
-    const af=document.getElementById('avatarFile').files[0];
-    if(af){try{avatar=await uploadFile("avatars",`${name}_av`,af);}catch(e){}}
-    const resp=await fetch(`${SUPA_URL}/rest/v1/users`,{method:"POST",headers:H,body:JSON.stringify({username:name,password:pass,avatar,subscribers:[],keep_logged_in:keep})});
-    if(!resp.ok){err.innerText="Couldn't create account.";btn.disabled=false;btn.innerText="Enter";return;}
-    const j=await resp.json();const created=Array.isArray(j)?j[0]:j;
-    if(!created){err.innerText="Couldn't create account.";btn.disabled=false;btn.innerText="Enter";return;}
-    currentUser=created;
-  }else{if(existing[0].password!==pass){err.innerText="Wrong password.";btn.disabled=false;btn.innerText="Enter";return;}currentUser=existing[0];}
+
+  // --- Check local storage first for offline/fast login ---
+  const localKey=`zxy_account_${name}`;
+  const localAccount=localStorage.getItem(localKey);
+  if(localAccount){
+    try{
+      const acc=JSON.parse(localAccount);
+      if(acc.password!==pass){err.innerText="Wrong password.";btn.disabled=false;btn.innerText="Enter";return;}
+      currentUser={...acc,keep};
+      const store=keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));
+      document.getElementById('loginScreen').classList.add('hidden');btn.disabled=false;btn.innerText="Enter";
+      await finishInit();return;
+    }catch(e){}
+  }
+
+  // --- Try Supabase ---
+  try{
+    let existing=[];
+    try{existing=await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=*`);}catch(e){existing=[];}
+
+    if(loginSignInOnly){
+      // Sign in mode
+      if(!existing||!existing.length){err.innerText="No account found with that username.";btn.disabled=false;btn.innerText="Enter";return;}
+      if(existing[0].password!==pass){err.innerText="Wrong password.";btn.disabled=false;btn.innerText="Enter";return;}
+      currentUser=existing[0];
+    } else {
+      // Create or login
+      if(existing&&existing.length){
+        // Account exists — log in
+        if(existing[0].password!==pass){err.innerText="That username is taken. Use a different one, or switch to Sign In mode.";btn.disabled=false;btn.innerText="Enter";return;}
+        currentUser=existing[0];
+      } else {
+        // Create new account
+        let avatar=`https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=${Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0')}&color=fff`;
+        const af=document.getElementById('avatarFile').files[0];
+        if(af){try{avatar=await uploadFile("avatars",`${name}_av_${Date.now()}`,af);}catch(e){
+          // Avatar upload failed — use data URL fallback
+          try{avatar=await new Promise(res=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.readAsDataURL(af);});}catch(e2){}
+        }}
+        // Try to insert into Supabase
+        const newUser={username:name,password:pass,avatar,subscribers:[],following:[],keep_logged_in:keep};
+        let created=null;
+        try{
+          const resp=await fetch(`${SUPA_URL}/rest/v1/users`,{method:"POST",headers:{...H,"Prefer":"return=representation"},body:JSON.stringify(newUser)});
+          const txt=await resp.text();
+          if(resp.ok){try{const j=JSON.parse(txt);created=Array.isArray(j)?j[0]:j;}catch(pe){}}
+          else{
+            // Supabase error — try to parse message
+            let msg='';try{const je=JSON.parse(txt);msg=je.message||je.hint||je.details||'';}catch(pe){}
+            if(msg.toLowerCase().includes('duplicate')||msg.toLowerCase().includes('unique')){
+              err.innerText="Username already taken. Choose another.";btn.disabled=false;btn.innerText="Enter";return;
+            }
+            // Supabase failed — fall through to local-only account
+            console.warn("Supabase insert failed, creating local account:",msg);
+          }
+        }catch(e){console.warn("Supabase unreachable, creating local account");}
+        // Use whatever we got, or build a local user object
+        currentUser=created||{...newUser,id:`local_${name}_${Date.now()}`};
+        // Always save locally so login works offline too
+        localStorage.setItem(localKey,JSON.stringify({...currentUser}));
+      }
+    }
+  }catch(e){
+    // Total failure — try local account only
+    if(localAccount){
+      try{const acc=JSON.parse(localAccount);if(acc.password!==pass){err.innerText="Wrong password.";btn.disabled=false;btn.innerText="Enter";return;}currentUser={...acc,keep};}catch(e2){err.innerText="Login error. Try again.";btn.disabled=false;btn.innerText="Enter";return;}
+    }else{
+      err.innerText="Network error. Check your connection and try again.";btn.disabled=false;btn.innerText="Enter";return;
+    }
+  }
+
+  if(!currentUser){err.innerText="Something went wrong. Try again.";btn.disabled=false;btn.innerText="Enter";return;}
   currentUser.keep=keep;
+  // Save locally for future offline logins
+  localStorage.setItem(localKey,JSON.stringify(currentUser));
   const store=keep?localStorage:sessionStorage;store.setItem('zxy_user',JSON.stringify(currentUser));
-  document.getElementById('loginScreen').classList.add('hidden');btn.disabled=false;btn.innerText="Enter";await finishInit();
+  document.getElementById('loginScreen').classList.add('hidden');btn.disabled=false;btn.innerText="Enter";
+  await finishInit();
 };
 
 window.logout=function(){localStorage.removeItem('zxy_user');sessionStorage.removeItem('zxy_user');if(chatPollInterval)clearInterval(chatPollInterval);location.reload();};
