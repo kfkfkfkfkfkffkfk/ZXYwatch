@@ -608,7 +608,8 @@ input:checked+.toggle-slider:before{transform:translateX(18px);}
       <button class="tab" onclick="setChatTab('group',this)">Group Chat</button>
     </div>
     <div id="ct-dm" class="tab-sect active">
-      <input id="dmUsername" class="field" placeholder="Username to message">
+      <input id="dmUsername" class="field" placeholder="Username to message" autocapitalize="none" autocorrect="off" spellcheck="false" oninput="checkDmUser(this.value)">
+      <div id="dmUserHint" style="font-size:12px;min-height:18px;margin:-4px 0 8px 2px;"></div>
     </div>
     <div id="ct-group" class="tab-sect">
       <input id="groupName" class="field" placeholder="Group name (e.g. The Squad)">
@@ -701,6 +702,7 @@ input:checked+.toggle-slider:before{transform:translateX(18px);}
 <script>
 const SUPA_URL="https://sdqhwgltfjiwnhnuszjv.supabase.co";
 const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkcWh3Z2x0Zmppd25obnVzemp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDI2MzQsImV4cCI6MjA5MjM3ODYzNH0.Jm5KvS1PCKNRR7xtEBdb68v-v23n0euPhfZQCsHtlXs";
+// H kept for backwards compat
 const H={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
 const REACTIONS=["❤️","👍","👎","🔥","💀","😂","😭","🤣","😮","👀","💯","🎉","😈","🤮","🙏","💅","🤔","😬","🥶","🫡","⚡","🌊","🎯","💎","🚀","🤌","😤","🥹","🫶","💸"];
 const TENOR_KEY="AIzaSyAyimkuYQYF_FXVALexPQnzfKEyKqv7imQ";
@@ -714,10 +716,46 @@ let _searchFilter='all',_searchQuery='',_searchUsers=[],_searchTimer=null;
 let _pendingDeleteId=null,_gifTabMode='mine',_lpDebounce=null;
 
 // ── DB HELPERS ──────────────────────────────────────────────────────────────
-async function dbGet(t,q=""){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{headers:H});if(!r.ok)return[];return r.json();}catch(e){return[];}}
-async function dbPost(t,b){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{method:"POST",headers:H,body:JSON.stringify(b)});if(!r.ok)return null;const j=await r.json();return Array.isArray(j)?j[0]:j;}catch(e){return null;}}
-async function dbPatch(t,q,b){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"PATCH",headers:H,body:JSON.stringify(b)});if(!r.ok)return null;return r.json();}catch(e){return null;}}
-async function dbDelete(t,q){try{await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"DELETE",headers:H});}catch(e){}}
+// Headers without Prefer so Supabase doesn't require return=representation RLS
+const H_READ  = {"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+const H_WRITE = {"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
+const H_WRITE_RETURN = {"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
+
+async function dbGet(t,q=""){
+  try{
+    const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{headers:H_READ});
+    if(!r.ok){console.warn("dbGet failed",t,r.status,await r.text().catch(()=>''));return[];}
+    return r.json();
+  }catch(e){console.warn("dbGet error",t,e.message);return[];}
+}
+
+// Returns {ok, data, error}
+async function dbPostSafe(t,b){
+  try{
+    const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{method:"POST",headers:H_WRITE_RETURN,body:JSON.stringify(b)});
+    const txt=await r.text();
+    if(!r.ok){
+      let msg=txt;try{const j=JSON.parse(txt);msg=j.message||j.hint||j.details||j.error||txt;}catch(e){}
+      return{ok:false,data:null,error:msg};
+    }
+    let data=null;try{const j=JSON.parse(txt);data=Array.isArray(j)?j[0]:j;}catch(e){data=b;}
+    return{ok:true,data,error:null};
+  }catch(e){return{ok:false,data:null,error:e.message};}
+}
+
+async function dbPost(t,b){const res=await dbPostSafe(t,b);return res.ok?res.data:null;}
+
+async function dbPatch(t,q,b){
+  try{
+    const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"PATCH",headers:H_WRITE,body:JSON.stringify(b)});
+    if(!r.ok){console.warn("dbPatch failed",t,r.status);return null;}
+    return b;
+  }catch(e){console.warn("dbPatch error",t,e.message);return null;}
+}
+
+async function dbDelete(t,q){
+  try{await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:"DELETE",headers:H_WRITE});}catch(e){}
+}
 
 async function uploadFile(bucket,path,file,onProg){
   return new Promise((res,rej)=>{
@@ -788,6 +826,8 @@ async function finishInit(){
   // Setup GIF drop zone
   const dz=document.getElementById('gifDropZone');
   if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');const f=e.dataTransfer.files[0];if(f){const inp=document.getElementById('gifUploadFile');const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;uploadUserGif(inp);}});}
+  // Poll Supabase every 30s so new posts from other users appear
+  setInterval(async()=>{const remote=await dbGet("posts","select=*&order=created_at.desc");if(remote&&remote.length&&remote.length!==allPosts.length){allPosts=remote;savePostsLocal(allPosts);const fp=document.getElementById("page-feed");if(fp&&fp.classList.contains("active"))renderFeed();updateNotifBadge();}},30000);
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -856,7 +896,7 @@ window.attemptLogin=async function(){
         const newUser={username:name,password:pass,avatar,subscribers:[],following:[],keep_logged_in:keep};
         let created=null;
         try{
-          const resp=await fetch(`${SUPA_URL}/rest/v1/users`,{method:"POST",headers:{...H,"Prefer":"return=representation"},body:JSON.stringify(newUser)});
+          const resp=await fetch(`${SUPA_URL}/rest/v1/users`,{method:"POST",headers:H_WRITE_RETURN,body:JSON.stringify(newUser)});
           const txt=await resp.text();
           if(resp.ok){try{const j=JSON.parse(txt);created=Array.isArray(j)?j[0]:j;}catch(pe){}}
           else{
@@ -934,13 +974,11 @@ window.showPage=function(name){
 };
 
 // ── POSTS ─────────────────────────────────────────────────────────────────────
+// ── POSTS ─────────────────────────────────────────────────────────────────────
 async function loadPosts(){
-  const local=loadPostsLocal();if(local.length)allPosts=local;
-  try{
-    const remote=await dbGet("posts","select=*&order=created_at.desc");
-    if(remote&&remote.length){allPosts=remote;savePostsLocal(allPosts);}
-    else if(!allPosts.length)allPosts=local;
-  }catch(e){}
+  const remote=await dbGet("posts","select=*&order=created_at.desc");
+  if(remote&&remote.length){allPosts=remote;savePostsLocal(allPosts);}
+  else{allPosts=loadPostsLocal();}
 }
 
 window.renderFeed=function(){
@@ -975,7 +1013,7 @@ function buildPostCard(post){
   }
   const isSelf=post.uploader===m;
   const div=document.createElement('div');div.className='video-card';div.id='post-'+post.id;
-  div.innerHTML=`${contentHTML}<div class="meta">${post.type!=='poll'?`<div class="post-title">${post.title}</div>`:''}${post.description?`<div class="post-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>`:''}${post.music_url?buildMusicEmbed(post.music_url,post.id):''}<div class="post-stats">${post.created_at?new Date(post.created_at).toLocaleDateString():''} · ${post.views||0} views</div><div class="uploader-row"><div class="uploader-info"><img src="${post.uploader_avatar||''}" class="uploader-pic" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><span class="uploader-name">@${post.uploader||''}</span></div>${!isSelf?`<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}','${post.id}')">Subscribe</button>`:''}</div><div class="action-row"><div class="act ${isLiked?'liked':''}" onclick="toggleLike('${post.id}')">👍 <span id="lc-${post.id}">${(post.likes||[]).length}</span></div><div class="act ${isDisliked?'disliked':''}" onclick="toggleDislike('${post.id}')">👎 <span id="dc-${post.id}">${(post.dislikes||[]).length}</span></div><div class="act ${isHearted?'hearted':''}" onclick="toggleHeart('${post.id}')">❤️ <span id="hc-${post.id}">${(post.hearts||[]).length}</span></div><div class="act" onclick="toggleReactions('${post.id}')">😊</div><div class="act" onclick="toggleComments('${post.id}')">💬 <span id="cc-${post.id}">${comments.length}</span></div>${!isSelf?`<div class="act" onclick="openReport('${post.id}')">⚑</div>`:''}</div><div id="reactions-${post.id}" class="reactions-panel">${buildReactSummary(post.reactions||{},post.id)}</div><div id="comments-${post.id}" class="comments-area"><div class="comment-list" id="cl-${post.id}">${comments.map(c=>`<div class="comment-item"><span class="comment-user">@${c.user}</span>${c.text}</div>`).join('')}</div><div class="comment-input-row"><input class="comment-input" id="ci-${post.id}" placeholder="Comment..."><button class="btn-ghost" style="color:var(--blue);font-weight:800;" onclick="postComment('${post.id}')">Post</button></div></div></div>`;
+  div.innerHTML=`${contentHTML}<div class="meta">${post.type!=='poll'?`<div class="post-title">${post.title}</div>`:''}${post.description?`<div class="post-desc" onclick="this.classList.toggle('expanded')">${post.description}</div>`:''}${post.music_url?buildMusicEmbed(post.music_url,post.id):''}<div class="post-stats">${post.created_at?new Date(post.created_at).toLocaleDateString():''} · ${post.views||0} views</div><div class="uploader-row"><div class="uploader-info"><img src="${post.uploader_avatar||''}" class="uploader-pic" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(post.uploader||'?')}&background=333&color=fff'"><span class="uploader-name">@${post.uploader||''}</span></div>${!isSelf?`<button class="sub-btn" id="sub-${post.id}" onclick="toggleSub('${post.uploader}','${post.id}')">Subscribe</button>`:''}</div><div class="action-row"><div class="act ${isLiked?'liked':''}" onclick="toggleLike('${post.id}')">👍 <span id="lc-${post.id}">${(post.likes||[]).length}</span></div><div class="act ${isDisliked?'disliked':''}" onclick="toggleDislike('${post.id}')">👎 <span id="dc-${post.id}">${(post.dislikes||[]).length}</span></div><div class="act ${isHearted?'hearted':''}" onclick="toggleHeart('${post.id}')">❤️ <span id="hc-${post.id}">${(post.hearts||[]).length}</span></div><div class="act" onclick="toggleComments('${post.id}')">💬 <span id="cc-${post.id}">${comments.length}</span></div>${!isSelf?`<div class="act" onclick="openReport('${post.id}')">⚑</div>`:''}</div><div id="comments-${post.id}" class="comments-area"><div class="comment-list" id="cl-${post.id}">${comments.map(c=>`<div class="comment-item"><span class="comment-user">@${c.user}</span>${c.text}</div>`).join('')}</div><div class="comment-input-row"><input class="comment-input" id="ci-${post.id}" placeholder="Comment..."><button class="btn-ghost" style="color:var(--blue);font-weight:800;" onclick="postComment('${post.id}')">Post</button></div></div></div>`;
   if(!isSelf){dbGet("users",`username=eq.${encodeURIComponent(post.uploader)}&select=subscribers`).then(rows=>{const btn=document.getElementById(`sub-${post.id}`);if(btn&&rows&&rows[0]){const s=(rows[0].subscribers||[]).includes(m);btn.innerText=s?'Subscribed':'Subscribe';if(s)btn.classList.add('subbed');}});}
   return div;
 }
@@ -1138,14 +1176,24 @@ window.submitPost=async function(){
       else{try{ldObj=await doFetchLinkPreview(linkFull);}catch(e){ldObj={url:linkFull,title:title,description:desc,image:null,sitename:'',rawUrl:linkFull};}}
       media_url=ldObj.url||linkFull;
       const newPost={id:pid,type:'link',title:ldObj.title||title,description:ldObj.description||desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail:null,media_url,poll:null,link_data:{url:ldObj.url||linkFull,title:ldObj.title||title,description:ldObj.description||desc,image:ldObj.image||null,sitename:ldObj.sitename||''},music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0,created_at:new Date().toISOString()};
-      allPosts.unshift(newPost);savePostsLocal(allPosts);
-      dbPost("posts",newPost).catch(()=>{});
+      statusEl.innerText="Saving post...";
+      const result=await dbPostSafe("posts",newPost);
+      if(!result.ok){
+        btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';
+        return alert("Could not save post: "+result.error+"\n\nMake sure you are connected to the internet.");
+      }
+      allPosts.unshift(result.data||newPost);savePostsLocal(allPosts);
       closeModal('uploadModal');['postTitle','postDesc','postMusic','linkUrl'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});document.getElementById('linkPreviewBox').style.display='none';document.getElementById('lpStatus').innerText='';window._linkPreviewCache=null;btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';renderFeed();return;
     }
-    statusEl.innerText="Saving...";
+    statusEl.innerText="Saving post...";
     const newPost={id:pid,type:currentUploadType,title,description:desc,uploader:me(),uploader_avatar:currentUser.avatar,thumbnail,media_url,poll,link_data:null,music_url:music||null,likes:[],dislikes:[],hearts:[],comments:[],reactions:{},views:0,created_at:new Date().toISOString()};
-    allPosts.unshift(newPost);savePostsLocal(allPosts);
-    dbPost("posts",newPost).then(saved=>{if(saved){const idx=allPosts.findIndex(p=>p.id===pid);if(idx>=0)allPosts[idx]={...newPost,...saved};savePostsLocal(allPosts);}}).catch(()=>{});
+    // MUST save to Supabase so other users can see it
+    const result=await dbPostSafe("posts",newPost);
+    if(!result.ok){
+      btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';
+      return alert("Could not save post: "+result.error+"\n\nMake sure you are connected to the internet and try again.");
+    }
+    allPosts.unshift(result.data||newPost);savePostsLocal(allPosts);
     closeModal('uploadModal');
     ['postTitle','postDesc','postMusic','vidFile','vidLink','imgFile','pollOpt1','pollOpt2'].forEach(id=>{try{document.getElementById(id).value='';}catch(e){}});
     btn.disabled=false;btn.innerText='Post';statusEl.style.display='none';pw.style.display='none';pb.style.width='0%';
@@ -1185,14 +1233,49 @@ window.fetchLinkPreview=async function(){
 };
 
 async function doFetchLinkPreview(url){
-  // Try multiple APIs
-  const apis=[
-    async()=>{const r=await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=false&video=false&audio=false`,{headers:{'x-api-key':''}});const d=await r.json();if(d.status!=='success')throw new Error('microlink fail');const md=d.data;return{url,title:md.title||'',description:md.description||'',image:md.image?.url||md.logo?.url||null,sitename:md.publisher||new URL(url).hostname.replace('www.','')};},
-    async()=>{const r=await fetch(`https://jsonlink.io/api/extract?url=${encodeURIComponent(url)}`);const d=await r.json();if(!d.title)throw new Error('jsonlink fail');return{url,title:d.title||'',description:d.description||'',image:d.images?.[0]||null,sitename:d.domain||new URL(url).hostname.replace('www.','')};},
-    ()=>Promise.resolve({url,title:new URL(url).hostname.replace('www.',''),description:url,image:null,sitename:new URL(url).hostname.replace('www.','')})
-  ];
-  for(const api of apis){try{const result=await api();if(result)return result;}catch(e){}}
-  throw new Error('All preview APIs failed');
+  // 1. Try Microlink (most reliable, generous free tier)
+  try{
+    const r=await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`,{signal:AbortSignal.timeout(8000)});
+    if(r.ok){
+      const d=await r.json();
+      if(d.status==='success'&&d.data){
+        const md=d.data;
+        return{
+          url,
+          title:md.title||'',
+          description:md.description||'',
+          image:md.image?.url||md.screenshot?.url||null,
+          sitename:md.publisher||new URL(url).hostname.replace('www.','')
+        };
+      }
+    }
+  }catch(e){console.warn('microlink failed:',e.message);}
+
+  // 2. Try allorigins CORS proxy to fetch page and parse OG tags ourselves
+  try{
+    const proxyUrl=`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const r=await fetch(proxyUrl,{signal:AbortSignal.timeout(10000)});
+    if(r.ok){
+      const d=await r.json();
+      const html=d.contents||'';
+      const getTag=(prop)=>{
+        const m=html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']`,'i'))
+                ||html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,'i'));
+        return m?m[1].trim():'';
+      };
+      const title=getTag('og:title')||getTag('twitter:title')||(html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1]||'';
+      const description=getTag('og:description')||getTag('twitter:description')||getTag('description')||'';
+      const image=getTag('og:image')||getTag('twitter:image')||'';
+      const sitename=getTag('og:site_name')||new URL(url).hostname.replace('www.','');
+      if(title){
+        return{url,title:title.slice(0,120),description:description.slice(0,300),image:image||null,sitename};
+      }
+    }
+  }catch(e){console.warn('allorigins failed:',e.message);}
+
+  // 3. Minimal fallback — at least show the domain
+  const hostname=new URL(url).hostname.replace('www.','');
+  return{url,title:hostname,description:url,image:null,sitename:hostname};
 }
 
 // ── CHAT ───────────────────────────────────────────────────────────────────────
@@ -1214,29 +1297,82 @@ window.renderChats=async function(){
 };
 window.openNewChatModal=()=>openModal('newChatModal');
 window.setChatTab=function(type,btn){currentChatType=type;document.querySelectorAll('#newChatModal .tab').forEach(b=>b.classList.remove('active'));document.querySelectorAll('#newChatModal .tab-sect').forEach(s=>s.classList.remove('active'));btn.classList.add('active');document.getElementById(`ct-${type}`).classList.add('active');};
+
+let _dmCheckTimer=null;
+window.checkDmUser=function(val){
+  const hint=document.getElementById('dmUserHint');
+  clearTimeout(_dmCheckTimer);
+  const name=val.trim().toLowerCase();
+  if(!name){hint.innerText='';return;}
+  if(name===me()){hint.style.color='var(--accent)';hint.innerText="⚠ That's you!";return;}
+  hint.style.color='var(--text3)';hint.innerText='Checking...';
+  _dmCheckTimer=setTimeout(async()=>{
+    const found=await dbGet("users",`username=eq.${encodeURIComponent(name)}&select=username,avatar`);
+    if(found&&found.length){hint.style.color='var(--green)';hint.innerText=`✓ @${name} found`;}
+    else{hint.style.color='var(--accent)';hint.innerText=`✗ No account found for "@${name}"`;}
+  },500);
+};
 window.createChat=async function(){
   const m=me();
+  const createBtn=document.querySelector('#newChatModal .btn-primary');
+  if(createBtn){createBtn.disabled=true;createBtn.innerText='Checking...';}
+  const reset=()=>{if(createBtn){createBtn.disabled=false;createBtn.innerText='Create';}};
+
   if(currentChatType==='dm'){
     const target=document.getElementById('dmUsername').value.trim().toLowerCase();
-    if(!target)return alert("Enter a username.");if(target===m)return alert("Can't DM yourself.");
+    if(!target){reset();return alert("Enter a username.");}
+    if(target===m){reset();return alert("You can't message yourself.");}
+    // Verify the user actually exists
+    const found=await dbGet("users",`username=eq.${encodeURIComponent(target)}&select=username`);
+    if(!found||!found.length){reset();return alert(`No account found for "@${target}".\nMake sure you typed the username correctly.`);}
+    // Check if DM already exists
     const ex=allChats.find(c=>c.type==='dm'&&(c.members||[]).includes(m)&&(c.members||[]).includes(target));
-    if(ex){closeModal('newChatModal');openChatRoom(ex);return;}
+    if(ex){reset();closeModal('newChatModal');openChatRoom(ex);return;}
     const chatId=`dm_${[m,target].sort().join('_')}`;
     const chat=await dbPost("chats",{id:chatId,name:target,type:'dm',members:[m,target],is_private:false,created_by:m});
-    allChats.unshift(chat||{id:chatId,name:target,type:'dm',members:[m,target]});
-    closeModal('newChatModal');renderChats();openChatRoom(chat||allChats[0]);
+    reset();
+    if(!chat){return alert("Failed to create chat. Try again.");}
+    allChats.unshift(chat);
+    closeModal('newChatModal');renderChats();openChatRoom(chat);
   }else{
-    const name=document.getElementById('groupName').value.trim(),lang=document.getElementById('groupLang').value,priv=document.getElementById('groupPrivate').checked,membersRaw=document.getElementById('groupMembers').value;
-    if(!name)return alert("Enter a group name.");
-    const extra=membersRaw.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+    const name=document.getElementById('groupName').value.trim();
+    const lang=document.getElementById('groupLang').value;
+    const priv=document.getElementById('groupPrivate').checked;
+    const membersRaw=document.getElementById('groupMembers').value;
+    if(!name){reset();return alert("Enter a group name.");}
+    const extraNames=membersRaw.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+    // Verify all listed members exist
+    const invalidUsers=[];
+    for(const username of extraNames){
+      if(username===m)continue;
+      const found=await dbGet("users",`username=eq.${encodeURIComponent(username)}&select=username`);
+      if(!found||!found.length)invalidUsers.push(username);
+    }
+    if(invalidUsers.length){reset();return alert(`These usernames don't have accounts:\n${invalidUsers.map(u=>`• @${u}`).join('\n')}\n\nFix them and try again.`);}
     const chatId=`grp_${m}_${Date.now()}`;
-    const chat=await dbPost("chats",{id:chatId,name,type:'group',language:lang,members:[m,...extra],is_private:priv,created_by:m});
-    allChats.unshift(chat||{id:chatId,name,type:'group'});
-    closeModal('newChatModal');renderChats();openChatRoom(chat||allChats[0]);
+    const chat=await dbPost("chats",{id:chatId,name,type:'group',language:lang,members:[m,...extraNames],is_private:priv,created_by:m});
+    reset();
+    if(!chat){return alert("Failed to create group. Try again.");}
+    allChats.unshift(chat);
+    closeModal('newChatModal');renderChats();openChatRoom(chat);
   }
 };
 window.openAddMemberModal=()=>openModal('addMemberModal');
-window.addMemberToChat=async function(){const user=document.getElementById('addMemberUser').value.trim().toLowerCase();if(!user||!currentChatId)return;const chat=allChats.find(c=>c.id===currentChatId);if(!chat)return;const members=[...(chat.members||[])];if(!members.includes(user))members.push(user);chat.members=members;await dbPatch("chats",`id=eq.${encodeURIComponent(currentChatId)}`,{members});closeModal('addMemberModal');alert(`${user} added!`);};
+window.addMemberToChat=async function(){
+  const user=document.getElementById('addMemberUser').value.trim().toLowerCase();
+  if(!user||!currentChatId)return;
+  const found=await dbGet("users",`username=eq.${encodeURIComponent(user)}&select=username`);
+  if(!found||!found.length)return alert(`No account found for "@${user}".\nMake sure the username is correct.`);
+  const chat=allChats.find(c=>c.id===currentChatId);
+  if(!chat)return;
+  const members=[...(chat.members||[])];
+  if(members.includes(user))return alert(`@${user} is already in this chat.`);
+  members.push(user);chat.members=members;
+  await dbPatch("chats",`id=eq.${encodeURIComponent(currentChatId)}`,{members});
+  closeModal('addMemberModal');
+  document.getElementById('addMemberUser').value='';
+  alert(`@${user} added to the chat!`);
+};
 
 async function openChatRoom(chat){
   currentChatId=chat.id;
