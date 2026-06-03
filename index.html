@@ -1622,5 +1622,40 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal'))cl
 // ── START ─────────────────────────────────────────────────────────────────────
 init();
 </script>
+
+<!-- ZXY CROSS-APP NOTIFICATION EMITTER -->
+<script>
+// ── ZXY NOTIFICATION EMITTER ──────────────────────────────
+(function(){
+  const ZXY_NOTIF_KEY='zxy_global_notifications';
+  const ZXY_CHANNEL='zxy_notif_channel';
+  window.ZXYnotify=function(app,text){
+    const notif={id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),app,text,ts:Date.now()};
+    try{const list=JSON.parse(localStorage.getItem(ZXY_NOTIF_KEY)||'[]');list.unshift(notif);localStorage.setItem(ZXY_NOTIF_KEY,JSON.stringify(list.slice(0,60)));}catch(e){}
+    try{const bc=new BroadcastChannel(ZXY_CHANNEL);bc.postMessage({type:'new_notif',notif});setTimeout(()=>bc.close(),500);}catch(e){}
+  };
+})();
+
+// ── HOOK POST CREATION TO SEND NOTIFICATION ──────────────
+// We wrap submitPost to fire a notification after successful post
+(function(){
+  const _orig = window.submitPost;
+  window.submitPost = async function(){
+    await _orig.apply(this, arguments);
+    // After post, notify
+    try {
+      const user = typeof currentUser !== 'undefined' && currentUser ? (currentUser.name || 'Someone') : 'Someone';
+      const title = document.getElementById('postTitle') ? document.getElementById('postTitle').value.trim() : '';
+      const type = typeof currentUploadType !== 'undefined' ? currentUploadType : 'post';
+      const typeLabel = type === 'video' ? '🎬 video' : type === 'image' ? '🖼️ photo' : type === 'poll' ? '📊 poll' : type === 'link' ? '🔗 link' : '📝 post';
+      const msg = title
+        ? user + ' posted a new ' + typeLabel + ': "' + title.slice(0, 50) + (title.length > 50 ? '…' : '') + '"'
+        : user + ' shared a new ' + typeLabel + ' on ZXYwatch';
+      window.ZXYnotify('watch', msg);
+    } catch(e) {}
+  };
+})();
+</script>
 </body>
+
 </html>
